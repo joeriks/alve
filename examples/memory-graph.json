@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "0.1-design",
+  "vaultId": "vault-example",
+  "nodes": [
+    {
+      "id": "project-alve", "vaultId": "vault-example", "revisionId": "rev-project-1",
+      "type": "project", "titleTemplate": "Alve: portable personal memory",
+      "description": "A local-first curated memory graph with flexible AI access.",
+      "facts": [], "referenceIds": [], "tags": ["alve"],
+      "createdAt": "2026-09-30T10:00:00Z", "updatedAt": "2026-09-30T10:00:00Z"
+    },
+    {
+      "id": "memory-sync", "vaultId": "vault-example", "revisionId": "rev-sync-1",
+      "type": "memory", "kind": "decision", "titleTemplate": "Sync directly over Wi-Fi or a phone hotspot",
+      "body": { "format": "bullets", "items": [
+        "Approved devices exchange changes directly on the same local network.",
+        "Offline devices use their last synchronized information.",
+        "Internet synchronization can be considered later."
+      ] },
+      "facts": [], "referenceIds": ["ref-design"], "tags": ["sync"],
+      "origin": "user", "verification": "user_confirmed", "status": "active",
+      "createdAt": "2026-09-30T10:00:00Z", "updatedAt": "2026-09-30T10:00:00Z"
+    },
+    {
+      "id": "document-design", "vaultId": "vault-example", "revisionId": "rev-design-1",
+      "type": "document", "titleTemplate": "Local synchronization design discussion",
+      "description": "Illustrative source node; no private transcript is included.",
+      "facts": [], "referenceIds": [], "tags": ["source"],
+      "createdAt": "2026-09-30T10:00:00Z", "updatedAt": "2026-09-30T10:00:00Z"
+    }
+  ],
+  "relations": [
+    {
+      "id": "edge-project", "vaultId": "vault-example", "revisionId": "rev-edge-project-1",
+      "fromId": "memory-sync", "toId": "project-alve", "type": "belongs_to",
+      "origin": "user", "verification": "user_confirmed", "referenceIds": [],
+      "createdAt": "2026-09-30T10:00:00Z"
+    },
+    {
+      "id": "edge-source", "vaultId": "vault-example", "revisionId": "rev-edge-source-1",
+      "fromId": "memory-sync", "toId": "document-design", "type": "based_on",
+      "origin": "user", "verification": "user_confirmed", "referenceIds": ["ref-design"],
+      "createdAt": "2026-09-30T10:00:00Z"
+    }
+  ],
+  "references": [
+    {
+      "id": "ref-design", "vaultId": "vault-example", "title": "Design source",
+      "target": { "type": "node", "nodeId": "document-design", "revisionId": "rev-design-1" }
+    }
+  ]
+}

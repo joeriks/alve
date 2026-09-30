@@ -1,0 +1,101 @@
+<div id="portable-memory-sketch">
+<style>
+#portable-memory-sketch{--pm-bg:light-dark(#f8f7f3,#171918);--pm-panel:light-dark(#fffefa,#202321);--pm-text:light-dark(#25332c,#e8ede8);--pm-sub:light-dark(#66736a,#a8b4ab);--pm-line:light-dark(#dce2da,#3b453d);--pm-active:light-dark(#e3eddf,#334b3c);--pm-action:light-dark(#315340,#b7d5be);--pm-on:light-dark(#ffffff,#19271e);font:14px/1.55 system-ui,sans-serif;color:var(--pm-text)}
+#portable-memory-sketch *{box-sizing:border-box}
+#portable-memory-sketch button,#portable-memory-sketch input,#portable-memory-sketch textarea{font:inherit}
+#portable-memory-sketch button{color:inherit;cursor:pointer}
+#portable-memory-sketch button:focus-visible,#portable-memory-sketch input:focus-visible,#portable-memory-sketch textarea:focus-visible{outline:2px solid var(--pm-action);outline-offset:3px}
+#portable-memory-sketch .pm-stage{min-height:690px}
+#portable-memory-sketch .pm-app{background:var(--pm-bg);border:1px solid var(--pm-line);border-radius:18px;overflow:hidden}
+#portable-memory-sketch .pm-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:20px 24px;border-bottom:1px solid var(--pm-line)}
+#portable-memory-sketch .pm-brand{display:flex;gap:12px;align-items:center;font-weight:600}
+#portable-memory-sketch .pm-mark{background:var(--pm-action);color:var(--pm-on);border-radius:10px;padding:6px 12px;font-size:20px}
+#portable-memory-sketch .pm-sub{color:var(--pm-sub);font-size:12px}
+#portable-memory-sketch .pm-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#portable-memory-sketch .pm-btn{background:var(--pm-panel);border:1px solid var(--pm-line);border-radius:9px;padding:8px 12px;min-height:40px}
+#portable-memory-sketch .pm-primary{background:var(--pm-action);color:var(--pm-on);border-color:var(--pm-action)}
+#portable-memory-sketch .pm-layout{display:grid;grid-template-columns:280px minmax(0,1fr)}
+#portable-memory-sketch .pm-sidebar{padding:22px 16px;border-right:1px solid var(--pm-line)}
+#portable-memory-sketch .pm-search{width:100%;border:1px solid var(--pm-line);background:var(--pm-panel);color:var(--pm-text);padding:10px 12px;border-radius:10px}
+#portable-memory-sketch .pm-section-label{margin:24px 8px 10px;color:var(--pm-sub);font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+#portable-memory-sketch .pm-entry{display:block;width:100%;text-align:left;background:transparent;border:0;border-radius:12px;padding:14px 12px;margin:5px 0}
+#portable-memory-sketch .pm-entry[aria-pressed=true]{background:var(--pm-active)}
+#portable-memory-sketch .pm-entry strong{display:block;font-weight:600;margin:5px 0}
+#portable-memory-sketch .pm-detail{padding:30px;min-width:0;background:var(--pm-panel)}
+#portable-memory-sketch .pm-eyebrow{color:var(--pm-sub);font-size:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#portable-memory-sketch .pm-tag{background:var(--pm-active);border-radius:6px;padding:3px 7px}
+#portable-memory-sketch h2{font-size:26px;line-height:1.25;font-weight:600;margin:16px 0 20px;letter-spacing:-.025em}
+#portable-memory-sketch h3{font-size:15px;font-weight:600;margin:0 0 10px}
+#portable-memory-sketch p{margin:0 0 16px}
+#portable-memory-sketch ul{padding-left:20px;margin:12px 0 22px}
+#portable-memory-sketch li{margin:8px 0}
+#portable-memory-sketch .pm-facts{width:100%;border-collapse:collapse;margin:22px 0}
+#portable-memory-sketch .pm-facts td{padding:12px 0;border-bottom:1px solid var(--pm-line);vertical-align:top}
+#portable-memory-sketch .pm-facts td:first-child{color:var(--pm-sub);width:48%}
+#portable-memory-sketch .pm-facts td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+#portable-memory-sketch details{border-top:1px solid var(--pm-line);padding:14px 0}
+#portable-memory-sketch summary{cursor:pointer;font-weight:500}
+#portable-memory-sketch details p{margin:12px 0 0;color:var(--pm-sub)}
+#portable-memory-sketch .pm-actions{display:flex;gap:8px;flex-wrap:wrap;margin:22px 0}
+#portable-memory-sketch .pm-ai{padding:18px;border-radius:12px;background:var(--pm-bg);border:1px solid var(--pm-line);margin-top:22px}
+#portable-memory-sketch .pm-ai label{display:block;margin:12px 0 7px}
+#portable-memory-sketch textarea{width:100%;min-height:82px;resize:vertical;background:var(--pm-panel);color:var(--pm-text);border:1px solid var(--pm-line);border-radius:8px;padding:10px}
+#portable-memory-sketch .pm-answer{border-top:1px solid var(--pm-line);margin-top:16px;padding-top:16px}
+#portable-memory-sketch .pm-footer{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px 24px;border-top:1px solid var(--pm-line);font-size:12px;color:var(--pm-sub)}
+#portable-memory-sketch .pm-phone{max-width:390px;margin:0 auto;border-radius:26px}
+#portable-memory-sketch .pm-phone .pm-top{padding:18px}
+#portable-memory-sketch .pm-phone .pm-sidebar{border:0;padding:16px}
+#portable-memory-sketch .pm-phone .pm-detail{padding:22px}
+#portable-memory-sketch .pm-phone h2{font-size:23px}
+#portable-memory-sketch .pm-phone .pm-footer{padding:12px 18px}
+#portable-memory-sketch .pm-phone-list .pm-entry{border-bottom:1px solid var(--pm-line);border-radius:0}
+#portable-memory-sketch .pm-edit{margin-top:18px;padding-top:18px;border-top:1px solid var(--pm-line)}
+#portable-memory-sketch .pm-edit label{display:block;margin:10px 0 6px}
+#portable-memory-sketch [hidden]{display:none!important}
+@media(max-width:640px){#portable-memory-sketch .pm-layout{grid-template-columns:1fr}#portable-memory-sketch .pm-sidebar{border-right:0;border-bottom:1px solid var(--pm-line)}#portable-memory-sketch .pm-detail{padding:22px}#portable-memory-sketch .pm-top{padding:18px}#portable-memory-sketch .pm-stage{min-height:690px}}
+@media(pointer:coarse){#portable-memory-sketch .pm-btn{min-height:44px}#portable-memory-sketch input,#portable-memory-sketch textarea{font-size:16px}}
+</style>
+<div class="viz-carousel" aria-label="Desktop and phone" data-previous-label="Previous" data-next-label="Next">
+<section data-variant="Desktop" class="pm-stage" aria-label="Desktop view">
+<div class="pm-app" data-device="desktop">
+<header class="pm-top"><div class="pm-brand"><span class="pm-mark">a</span><div>Alve<div class="pm-sub">Interactive sketch · Example data</div></div></div><div class="pm-tools"><button class="pm-btn" data-sync>Sync devices</button><button class="pm-btn pm-primary" data-new>+ New memory</button></div></header>
+<div class="pm-layout"><aside class="pm-sidebar"><input class="pm-search" type="search" placeholder="Search your memory…" aria-label="Search your memory"><div class="pm-section-label">Saved memories</div><div data-list></div></aside><main class="pm-detail" data-detail></main></div>
+<footer class="pm-footer"><span>Preview only · No storage or encryption</span><span data-sync-status role="status">Phone · last synced 09:42</span></footer>
+</div></section>
+<section data-variant="Phone" class="pm-stage viz-dotted-background" aria-label="Phone view" hidden>
+<div class="pm-app pm-phone" data-device="phone">
+<header class="pm-top"><div class="pm-brand"><span class="pm-mark">a</span><span>Alve <span class="pm-sub">· Preview</span></span></div><button class="pm-btn" data-sync>Sync</button></header>
+<div class="pm-phone-list"><aside class="pm-sidebar"><input class="pm-search" type="search" placeholder="Search your memory…" aria-label="Search your memory"><div class="pm-actions"><button class="pm-btn pm-primary" data-new>+ New memory</button></div><div data-list></div></aside></div>
+<main class="pm-detail" data-detail hidden></main>
+<footer class="pm-footer"><span>Preview only · No persistent storage</span><span data-sync-status role="status">Laptop · 09:42</span></footer>
+</div></section>
+</div>
+<script>
+(()=>{
+ const root=document.getElementById('portable-memory-sketch');
+ const entries=[
+ {id:'insurance',kind:'Record',scope:'Home',title:'Home insurance renews on November 1',preview:'SEK 3,450 per year · Review the terms',body:'Review the terms and compare the premium before renewal.',facts:[['Renewal date','November 1, 2026'],['Annual premium','SEK 3,450'],['Status','Confirmed by you']],ref:'Insurance letter 2026 · page 2',history:'Confirmed by you on September 30. Amount and date came from the insurance letter.'},
+ {id:'sync',kind:'Decision',scope:'Portable memory',title:'Sync directly over Wi-Fi or hotspot',preview:'No cloud storage · Offline first',bullets:['Devices exchange changes directly on the same network.','When traveling, connect the laptop to the phone hotspot.','Without a connection, use the last synchronized information.'],ref:'Local synchronization discussion · September 30, 2026',history:'Decision confirmed by you. Internet synchronization has not been decided.'},
+ {id:'writing',kind:'Preference',scope:'Personal',title:'Main point first, references last',preview:'Concise writing that stands on its own',bullets:['Each memory has a meaningful summary heading.','One sentence to half an A4 page, when needed.','Details and evidence are available through references.'],ref:'Concise writing discussion · September 30, 2026',history:'Current preference for how memories should be written and displayed.'}
+ ];
+ const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ root.querySelectorAll('[data-device]').forEach(app=>{
+ const phone=app.dataset.device==='phone',list=app.querySelector('[data-list]'),detail=app.querySelector('[data-detail]');
+ let selected='insurance';
+ function renderList(q=''){list.innerHTML=entries.filter(e=>(e.title+' '+e.preview+' '+e.scope).toLocaleLowerCase('en').includes(q.toLocaleLowerCase('en'))).map(e=>`<button class="pm-entry" data-id="${e.id}" aria-pressed="${e.id===selected}"><span class="pm-sub">${escape(e.kind)} · ${escape(e.scope)}</span><strong>${escape(e.title)}</strong><span class="pm-sub">${escape(e.preview)}</span></button>`).join('')||'<p class="pm-sub">No memories match your search.</p>';list.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>{selected=b.dataset.id;renderList(app.querySelector('input').value);renderDetail();if(phone){app.querySelector('.pm-phone-list').hidden=true;detail.hidden=false;}});}
+ function renderDetail(){const e=entries.find(x=>x.id===selected);detail.innerHTML=`${phone?'<button class="pm-btn" data-back>← All memories</button>':''}<div class="pm-eyebrow" style="margin-top:12px"><span class="pm-tag">${escape(e.kind)}</span><span>${escape(e.scope)}</span></div><h2>${escape(e.title)}</h2>${e.bullets?'<ul>'+e.bullets.map(t=>'<li>'+escape(t)+'</li>').join('')+'</ul>':'<p>'+escape(e.body)+'</p>'}${e.facts?'<table class="pm-facts" aria-label="Precise facts"><tbody>'+e.facts.map(f=>'<tr><td>'+escape(f[0])+'</td><td>'+escape(f[1])+'</td></tr>').join('')+'</tbody></table>':''}<details><summary>Reference · 1 source</summary><p>${escape(e.ref)}</p></details><details><summary>History and provenance</summary><p>${escape(e.history)}</p></details><div class="pm-actions"><button class="pm-btn pm-primary" data-ai>Use with AI</button><button class="pm-btn" data-edit>Edit</button></div><div data-edit-area></div><section class="pm-ai" data-ai-area hidden><h3>Ask with this memory</h3><div class="pm-sub">Example connection: AI on your laptop · This memory only</div><label for="question-${app.dataset.device}">Your question</label><textarea id="question-${app.dataset.device}" placeholder="What would you like to explore?"></textarea><button class="pm-btn pm-primary" data-ask style="margin-top:12px">Show example response</button><div class="pm-answer" data-answer hidden aria-live="polite"><h3>${e.id==='insurance'?'Compare before your insurance renews':'Start from the confirmed memory'}</h3><p>${e.id==='insurance'?'You recorded renewal on November 1 and an annual premium of SEK 3,450. A next step could be comparing coverage and terms.':'This memory can inform the next discussion without including the whole previous conversation.'}</p><div class="pm-sub">Example response · No AI is connected in this preview</div></div></section>`;
+ if(phone)detail.querySelector('[data-back]').onclick=()=>{detail.hidden=true;app.querySelector('.pm-phone-list').hidden=false;};
+ detail.querySelector('[data-ai]').onclick=()=>{detail.querySelector('[data-ai-area]').hidden=false;detail.querySelector('textarea').focus();};
+ detail.querySelector('[data-ask]').onclick=()=>{detail.querySelector('[data-answer]').hidden=false;};
+ detail.querySelector('[data-edit]').onclick=()=>editor(e);
+ }
+ function editor(e){detail.hidden=false;if(phone)app.querySelector('.pm-phone-list').hidden=true;const area=detail.querySelector('[data-edit-area]')||detail;area.innerHTML=`<div class="pm-edit"><h3>${e?'Edit memory':'New memory'}</h3><label>Main point<input class="pm-search" data-title value="${e?escape(e.title):''}" placeholder="What should you remember?"></label><label>Necessary details<textarea data-body placeholder="Short text or one bullet per line">${e?escape(e.bullets?e.bullets.join('\n'):e.body):''}</textarea></label><div class="pm-sub">References and precise facts are stored separately from the text.</div><div class="pm-actions"><button class="pm-btn pm-primary" data-save>Save memory</button><button class="pm-btn" data-cancel>Cancel</button></div><div data-validation role="alert"></div></div>`;area.querySelector('[data-cancel]').onclick=renderDetail;area.querySelector('[data-save]').onclick=()=>{const title=area.querySelector('[data-title]').value.trim(),body=area.querySelector('[data-body]').value.trim();if(!title){area.querySelector('[data-validation]').textContent='Write a main point before saving.';return;}if(e){e.title=title;e.body=body;delete e.bullets;}else{const n={id:'new-'+entries.length,kind:'Note',scope:'Personal',title,body,preview:body||'Saved by you',ref:'No reference added',history:'Saved by you in the preview.'};entries.unshift(n);selected=n.id;}renderList();renderDetail();app.querySelector('[data-sync-status]').textContent='Change saved · Not synchronized';};}
+ app.querySelector('.pm-search').addEventListener('input',ev=>renderList(ev.target.value));
+ app.querySelector('[data-new]').onclick=()=>{detail.innerHTML='';editor(null);};
+ app.querySelector('[data-sync]').onclick=()=>{app.querySelector('[data-sync-status]').textContent='Preview: connect both devices to the same Wi-Fi and open the app.';};
+ renderList();renderDetail();
+ });
+ if(globalThis.Tweak){const state={references:false};const tweak=new Tweak({container:root,onChange:()=>root.querySelectorAll('details').forEach(d=>d.open=state.references)});tweak.addToggle(state,'references',{label:'Show references and history'});}
+})();
+</script>
+</div>
