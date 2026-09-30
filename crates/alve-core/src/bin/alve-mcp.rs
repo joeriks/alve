@@ -97,7 +97,9 @@ fn call(name: &str, args: &Value) -> std::result::Result<Value, String> {
             )
         }
         "prepare_memory" => api("/api/ai/proposals/prepare", Some(args)),
+        "prepare_memory_batch" => api("/api/ai/proposals/prepare-batch", Some(args)),
         "propose_memory" => api("/api/ai/proposals", Some(args)),
+        "propose_memory_batch" => api("/api/ai/proposals/submit-batch", Some(args)),
         _ => Err("Unknown tool.".into()),
     }
 }
@@ -265,13 +267,13 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_exposes_exactly_five_tools() {
+    fn tools_list_exposes_exactly_seven_tools() {
         let response =
             handle(json!({"jsonrpc":"2.0","id":8,"method":"tools/list","params":{}})).unwrap();
         let tools = response["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 5);
+        assert_eq!(tools.len(), 7);
         assert_eq!(tools[0]["name"], "search_memory");
-        assert_eq!(tools[4]["name"], "propose_memory");
+        assert_eq!(tools[6]["name"], "propose_memory_batch");
     }
 
     #[test]

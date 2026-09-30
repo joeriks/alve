@@ -58,6 +58,8 @@ class QualityGate:
         ticket = self.tickets.get(token)
         if not ticket or ticket["connectionId"] != connection_id or ticket["expires"] <= time.monotonic():
             raise Problem("Review is unavailable or expired. Prepare again.", 409)
+        if "batch" in ticket["payload"]:
+            raise Problem("Use submit-batch for a prepared batch.", 422)
         c = data.get("confirmation")
         if not isinstance(c, dict) or any(c.get(k) is not True for k in ("concise", "accurateToSource", "structured", "userConfirmed")):
             raise Problem("Obtain explicit user confirmation of this exact preview, then confirm userConfirmed, concise, accurateToSource, and structured as true. Otherwise revise and prepare again.", 422)
@@ -70,6 +72,64 @@ class QualityGate:
         if source == "reference" and not ticket["payload"]["content"]["references"]:
             raise Problem("Reference-based memories need a source reference in the preview. Prepare again with references.", 422)
         return ticket["payload"], confirmation
+
+    def prepare_batch(self, data, connection_id):
+        if not isinstance(data, dict) or set(data) != {"proposals", "groupTitle"}:
+            raise Problem("Supply proposals and groupTitle only.", 422)
+        proposals = data.get("proposals")
+        if not isinstance(proposals, list) or not 2 <= len(proposals) <= 50:
+            raise Problem("Prepare 2 to 50 proposals.", 422)
+        title = text(data.get("groupTitle"), "group title", 200, True)
+        payloads, updates = [], set()
+        for proposal in proposals:
+            if not isinstance(proposal, dict):
+                raise Problem("Each batch proposal must be an object.", 422)
+            preview = self.prepare(proposal, connection_id)
+            payload = self.tickets.pop(preview["reviewToken"])["payload"]
+            if payload["action"] == "update":
+                if payload["nodeId"] in updates:
+                    raise Problem("A batch cannot update the same memory twice.", 422)
+                updates.add(payload["nodeId"])
+            payloads.append(payload)
+        batch_id = secrets.token_hex(16)
+        current = time.monotonic()
+        token = secrets.token_urlsafe(32)
+        batch = {"batchId": batch_id, "title": title, "proposals": payloads,
+                 "group": {"title": title, "type": "project", "kind": "record",
+                           "body": "Groups the selected memories.", "tags": [], "facts": [],
+                           "references": [], "status": "active", "relationType": "belongs_to",
+                           "relationDirection": "member_to_group"}}
+        self.tickets[token] = {"payload": {"batch": batch}, "connectionId": connection_id,
+                               "expires": current + 600}
+        return {"status": "confirmation_required", "reviewToken": token, "batch": batch,
+                "checks": {"lengthWithinLimit": True, "explicitCategory": True,
+                           "typedFactsValid": True, "factualTruthVerified": False},
+                "instructions": ["Show the exact complete batch preview, including tags and the planned owner-created project group and belongs_to links, then request explicit confirmation."],
+                "expiresInSeconds": 600}
+
+    def confirmed_batch(self, data, connection_id):
+        if not isinstance(data, dict) or set(data) != {"reviewToken", "confirmation"}:
+            raise Problem("Prepare a batch first.", 422)
+        token = text(data.get("reviewToken"), "review token", 100, True)
+        ticket = self.tickets.get(token)
+        if not ticket or ticket["connectionId"] != connection_id or ticket["expires"] <= time.monotonic():
+            raise Problem("Review is unavailable or expired. Prepare again.", 409)
+        batch = ticket["payload"].get("batch")
+        if not isinstance(batch, dict):
+            raise Problem("Prepare a batch first.", 422)
+        c = data.get("confirmation")
+        if not isinstance(c, dict) or any(c.get(k) is not True for k in ("concise", "accurateToSource", "structured", "userConfirmed")):
+            raise Problem("Obtain explicit user confirmation of this preview.", 422)
+        source = c.get("sourceBasis")
+        if not isinstance(source, str) or source not in {"user_statement", "reference", "inference", "unknown"}:
+            raise Problem("State sourceBasis: user_statement, reference, inference, or unknown.", 422)
+        for payload in batch["proposals"]:
+            if source == "reference" and not payload["content"]["references"]:
+                raise Problem("Reference-based memories need source references in every preview.", 422)
+        confirmation = {"concise": True, "accurateToSource": True, "structured": True, "userConfirmed": True,
+                        "sourceBasis": source, "basis": text(c.get("basis"), "source basis explanation", 500, True),
+                        "uncertainties": text(c.get("uncertainties"), "uncertainties", 1000)}
+        return batch, confirmation
 
     def consume(self, token):
         self.tickets.pop(token, None)

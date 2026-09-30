@@ -106,6 +106,7 @@ impl Engine {
             }),
             ("POST", "/api/nodes") => self.vault.mutate(|v| v.add_node(data, None, None, "user")),
             ("POST", "/api/relations") => self.vault.mutate(|v| v.add_relation(data)),
+            ("POST", "/api/nodes/group") => self.vault.mutate(|v| v.group_nodes(data)),
             ("POST", "/api/connections") => self.vault.mutate(|v| v.grant(data)),
             ("POST", "/api/proposals/review-batch") => self.vault.mutate(|v| v.review_batch(data)),
             _ => {
@@ -230,6 +231,54 @@ impl Engine {
                 .and_then(|g| g["id"].as_str())
                 .unwrap_or(token);
             self.quality.prepare(data, actor)?
+        } else if method == "POST" && path == "/api/ai/proposals/prepare-batch" {
+            let proposals = data["proposals"]
+                .as_array()
+                .ok_or_else(|| Error::new(422, "Prepare 2 to 50 proposals."))?;
+            if !(2..=50).contains(&proposals.len()) {
+                return Err(Error::new(422, "Prepare 2 to 50 proposals."));
+            }
+            let mut update_ids = std::collections::HashSet::new();
+            for proposal in proposals {
+                let item = proposal
+                    .as_object()
+                    .ok_or_else(|| Error::new(422, "Invalid batch proposal fields."))?;
+                if item.keys().any(|key| {
+                    !matches!(
+                        key.as_str(),
+                        "action" | "nodeId" | "expectedRevision" | "content"
+                    )
+                }) {
+                    return Err(Error::new(422, "Invalid batch proposal fields."));
+                }
+                if proposal["action"] == "update" {
+                    let id = proposal["nodeId"]
+                        .as_str()
+                        .ok_or_else(|| Error::new(422, "Supply nodeId."))?;
+                    if !update_ids.insert(id) {
+                        return Err(Error::new(422, "Use a unique node ID for each update."));
+                    }
+                }
+            }
+            let heads = self.vault.heads()?;
+            for proposal in proposals {
+                if proposal["action"] == "update" {
+                    let id = proposal["nodeId"]
+                        .as_str()
+                        .ok_or_else(|| Error::new(400, "Supply nodeId."))?;
+                    self.vault.auth(token, false, Some("propose"), Some(id))?;
+                    if !heads.get(id).is_some_and(|a| {
+                        a.len() == 1 && a[0]["revisionId"] == proposal["expectedRevision"]
+                    }) {
+                        return Err(Error::new(409, "Read the current, non-conflicting revision before preparing an update."));
+                    }
+                }
+            }
+            let actor = grant
+                .as_ref()
+                .and_then(|g| g["id"].as_str())
+                .unwrap_or(token);
+            self.quality.prepare_batch(data, actor)?
         } else if method == "POST" && path == "/api/ai/proposals" {
             let actor = grant
                 .as_ref()
@@ -245,6 +294,18 @@ impl Engine {
                 p["qualityConfirmation"] = confirmation.clone();
                 Ok(p)
             })?;
+            self.quality
+                .consume(data["reviewToken"].as_str().unwrap_or(""));
+            result
+        } else if method == "POST" && path == "/api/ai/proposals/submit-batch" {
+            let actor = grant
+                .as_ref()
+                .and_then(|g| g["id"].as_str())
+                .unwrap_or(token);
+            let (batch, confirmation) = self.quality.confirmed_batch(data, actor)?;
+            let result = self
+                .vault
+                .mutate(|v| v.propose_batch(&batch, grant.as_ref(), &confirmation))?;
             self.quality
                 .consume(data["reviewToken"].as_str().unwrap_or(""));
             result

@@ -18,7 +18,7 @@ CONTRACT = {
     "version": "alve-poc-3",
     "purpose": "Maintain concise, human-readable, user-controlled personal memory.",
     "rules": [
-        'When saving several related memories, prepare each first and show all exact previews, including tags. One explicit human confirmation may cover that complete set; do not include later or changed items. Submit each confirmed proposal. The owner can approve selected proposals together in Alve and optionally create a shared group; shared tags alone do not create relations.',
+        "For related memories, use prepare-batch with a shared groupTitle and 2 to 50 proposals. Show the exact complete batch preview, including tags and the planned project group and belongs_to links. Ask for one explicit user confirmation of that entire set, then submit-batch with its single reviewToken. Owner approval of the complete immutable batch is still required; changed content or relations require a new preparation.",
         "Search existing memory before proposing additions; retrieve only relevant, authorized nodes.",
         "Search by text, tags, type/kind and offset-aware updatedSince/updatedBefore; retrieve exact nodes using their stable IDs. revisionId changes on edit.",
         "Modification timestamps are not event dates or proof that offline peers have synced. Search defaults to active memories; includeArchived is explicit. Check returned conflicts and read the current revision before proposing updates.",
@@ -46,6 +46,10 @@ CONTRACT = {
          "body": {"reviewToken": "from prepare", "confirmation": {"concise": True, "accurateToSource": True,
                   "structured": True, "userConfirmed": True, "sourceBasis": "user_statement, reference, inference, or unknown",
                   "basis": "Short explanation", "uncertainties": "Known qualifications or empty string"}}},
+        {"method": "POST", "path": "/api/ai/proposals/prepare-batch", "permission": "propose",
+         "body": {"groupTitle": "Shared project group heading", "proposals": "2 to 50 create/update proposal objects as in prepare"}},
+        {"method": "POST", "path": "/api/ai/proposals/submit-batch", "permission": "propose",
+         "body": {"reviewToken": "from prepare-batch", "confirmation": "Same explicit quality confirmation as single submit, covering the complete batch and group"}},
     ],
     "limitations": "No direct AI writes, LAN listener, native phone app, or app-initiated inference. A bounded local stdio MCP adapter is included.",
 }
@@ -221,6 +225,8 @@ class Handler(BaseHTTPRequestHandler):
             return vault.mutate(lambda: vault.add_node(data.get("content"), parts[2], parents))
         if method == "POST" and path == "/api/relations":
             return vault.mutate(lambda: vault.add_relation(data))
+        if method == "POST" and path == "/api/nodes/group":
+            return vault.mutate(lambda: vault.group_nodes(data))
         if method == "POST" and path == "/api/connections":
             return vault.mutate(lambda: vault.grant(data))
         if method == "DELETE" and len(parts) == 3 and parts[:2] == ["api", "connections"]:
@@ -266,6 +272,30 @@ class Handler(BaseHTTPRequestHandler):
                 if len(current) != 1 or current[0]["revisionId"] != data.get("expectedRevision"):
                     raise Problem("Read the current, non-conflicting revision before preparing an update.", 409)
             return respond(self.server.quality.prepare(data, grant["id"] if grant else None), grant)
+        if method == "POST" and path == "/api/ai/proposals/prepare-batch":
+            grant = vault.auth(token, permission="propose")
+            proposals = data.get("proposals") if isinstance(data, dict) else None
+            if not isinstance(proposals, list) or not 2 <= len(proposals) <= 50:
+                raise Problem("Prepare 2 to 50 proposals.", 422)
+            update_ids = set()
+            for proposal in proposals:
+                if not isinstance(proposal, dict) or set(proposal) - {"action", "nodeId", "expectedRevision", "content"}:
+                    raise Problem("Invalid batch proposal fields.", 422)
+                if proposal.get("action") == "update":
+                    node_id = proposal.get("nodeId")
+                    if not isinstance(node_id, str) or node_id in update_ids:
+                        raise Problem("Use a unique node ID for each update.", 422)
+                    update_ids.add(node_id)
+            heads = vault.heads() if update_ids else {}
+            for proposal in proposals:
+                if isinstance(proposal, dict) and proposal.get("action", "create") == "update":
+                    node_id = proposal.get("nodeId")
+                    if not isinstance(node_id, str) or (grant is not None and node_id not in grant["nodeIds"]):
+                        raise Problem("Node is unavailable to this connection.", 404)
+                    current = heads.get(node_id, [])
+                    if len(current) != 1 or current[0]["revisionId"] != proposal.get("expectedRevision"):
+                        raise Problem("Read the current, non-conflicting revision before preparing an update.", 409)
+            return respond(self.server.quality.prepare_batch(data, grant["id"] if grant else None), grant)
         if method == "POST" and path == "/api/ai/proposals":
             grant = vault.auth(token, permission="propose")
             payload, confirmation = self.server.quality.confirmed(data, grant["id"] if grant else None)
@@ -275,6 +305,12 @@ class Handler(BaseHTTPRequestHandler):
                 vault.db.execute("UPDATE proposals SET payload=? WHERE id=?", (canonical(result), result["id"]))
                 return result
             result = vault.mutate(submit)
+            self.server.quality.consume(data["reviewToken"])
+            return respond(result, grant)
+        if method == "POST" and path == "/api/ai/proposals/submit-batch":
+            grant = vault.auth(token, permission="propose")
+            batch, confirmation = self.server.quality.confirmed_batch(data, grant["id"] if grant else None)
+            result = vault.mutate(lambda: vault.propose_batch(batch, grant, confirmation))
             self.server.quality.consume(data["reviewToken"])
             return respond(result, grant)
         raise Problem("Endpoint not found.", 404)

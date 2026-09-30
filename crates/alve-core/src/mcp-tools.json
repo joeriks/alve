@@ -381,5 +381,302 @@
       ],
       "additionalProperties": false
     }
+  },
+  {
+    "name": "prepare_memory_batch",
+    "description": "Check 2 to 50 related memory proposals and issue one review token for the exact complete batch. This stores nothing. Show every preview and the planned project group to the user before propose_memory_batch.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "proposals": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "create",
+                  "update"
+                ],
+                "default": "create"
+              },
+              "nodeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "expectedRevision": {
+                "type": "string",
+                "minLength": 1
+              },
+              "content": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "body": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "Use at most 300 whitespace-separated words."
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "memory",
+                      "project",
+                      "person",
+                      "event",
+                      "document"
+                    ]
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "decision",
+                      "preference",
+                      "insight",
+                      "commitment",
+                      "record"
+                    ]
+                  },
+                  "tags": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 60
+                    }
+                  },
+                  "facts": {
+                    "type": "array",
+                    "maxItems": 30,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "value": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "text",
+                                    "boolean",
+                                    "date",
+                                    "datetime",
+                                    "money",
+                                    "quantity"
+                                  ]
+                                },
+                                "value": {
+                                  "oneOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    }
+                                  ]
+                                },
+                                "timeZone": {
+                                  "type": "string",
+                                  "maxLength": 80
+                                },
+                                "amount": {
+                                  "type": "string",
+                                  "maxLength": 80
+                                },
+                                "currency": {
+                                  "type": "string",
+                                  "pattern": "^[A-Z]{3}$"
+                                },
+                                "unit": {
+                                  "type": "string",
+                                  "maxLength": 40
+                                }
+                              },
+                              "required": [
+                                "type"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "precision": {
+                          "type": "string",
+                          "enum": [
+                            "exact",
+                            "approximate",
+                            "estimated"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "label"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "references": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "url": {
+                          "type": "string",
+                          "maxLength": 2000,
+                          "pattern": "^https?://"
+                        }
+                      },
+                      "required": [
+                        "title"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "archived"
+                    ]
+                  }
+                },
+                "required": [
+                  "title",
+                  "type",
+                  "kind"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "content"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "action": {
+                      "const": "update"
+                    }
+                  },
+                  "required": [
+                    "action"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "nodeId",
+                    "expectedRevision"
+                  ]
+                }
+              }
+            ],
+            "additionalProperties": false
+          }
+        },
+        "groupTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "proposals",
+        "groupTitle"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "propose_memory_batch",
+    "description": "Submit the exact prepared batch for owner review after explicit human confirmation. The owner must review all members together; approval creates the previewed project group and belongs_to links.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "reviewToken": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confirmation": {
+          "type": "object",
+          "properties": {
+            "concise": {
+              "const": true
+            },
+            "accurateToSource": {
+              "const": true
+            },
+            "structured": {
+              "const": true
+            },
+            "userConfirmed": {
+              "const": true
+            },
+            "sourceBasis": {
+              "type": "string",
+              "enum": [
+                "user_statement",
+                "reference",
+                "inference",
+                "unknown"
+              ]
+            },
+            "basis": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "uncertainties": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "concise",
+            "accurateToSource",
+            "structured",
+            "userConfirmed",
+            "sourceBasis",
+            "basis",
+            "uncertainties"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "reviewToken",
+        "confirmation"
+      ],
+      "additionalProperties": false
+    }
   }
 ]

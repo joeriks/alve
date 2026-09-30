@@ -138,10 +138,14 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"node_id": {"type": "string"}}, "required": ["node_id"]}},
     {"name": "prepare_memory", "description": "Check a complete proposed memory and issue a one-time review token. This stores nothing. Show the returned preview to the user and request explicit confirmation before propose_memory.",
      "inputSchema": PREPARE_INPUT},
+    {"name": "prepare_memory_batch", "description": "Prepare 2 to 50 exact memory previews and an owner-created project group. Show the complete batch preview and request one explicit confirmation.",
+     "inputSchema": {"type": "object", "properties": {"proposals": {"type": "array", "minItems": 2, "maxItems": 50, "items": PREPARE_INPUT}, "groupTitle": {"type": "string", "minLength": 1, "maxLength": 200}}, "required": ["proposals", "groupTitle"], "additionalProperties": False}},
     {"name": "propose_memory", "description": "Submit a previously prepared proposal for owner review only after explicit human confirmation. Never auto-confirm: attest each check, set userConfirmed true only after confirmation, and use the reviewToken unchanged.",
      "inputSchema": {"type": "object", "properties": {
          "reviewToken": {"type": "string", "minLength": 1}, "confirmation": FINAL_CONFIRMATION},
          "required": ["reviewToken", "confirmation"], "additionalProperties": False}},
+    {"name": "propose_memory_batch", "description": "Submit only a previously prepared batch token and explicit confirmation. This creates pending proposals only; the owner must approve the complete batch.",
+     "inputSchema": {"type": "object", "properties": {"reviewToken": {"type": "string", "minLength": 1}, "confirmation": FINAL_CONFIRMATION}, "required": ["reviewToken", "confirmation"], "additionalProperties": False}},
 ]
 
 
@@ -222,8 +226,12 @@ def handle(message):
                     data = api("/api/ai/nodes/" + quote(node_id, safe="") + ("/relations" if name == "get_relations" else ""))
                 elif name == "prepare_memory":
                     data = api("/api/ai/proposals/prepare", args)
+                elif name == "prepare_memory_batch":
+                    data = api("/api/ai/proposals/prepare-batch", args)
                 elif name == "propose_memory":
                     data = api("/api/ai/proposals", args)
+                elif name == "propose_memory_batch":
+                    data = api("/api/ai/proposals/submit-batch", args)
                 else:
                     raise ValueError("Unknown tool")
                 result = {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False)}], "isError": False}

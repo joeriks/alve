@@ -31,3 +31,11 @@ Synchronization is about exchanging changes between trusted installations. Backu
 
 Do not overwrite an existing destination vault to migrate it. Restore to a fresh installation first, confirm the graph and exact values, and retain the source and independent backup until verification is complete. For reciprocal manual exchange, use export and import so both sides' retained history and conflicts can be reviewed.
 
+
+## Recovery drill
+
+Before relying on backups, export a dated encrypted bundle and restore it into a fresh, separate data directory. Do not restore over your working vault. Compare the vault ID, memory headings, tags, exact facts, relations and revision history, then lock and reopen the recovered vault. Changes made after the backup will not be recovered from that older file. AI grants and pending proposals are intentionally excluded; create new connections separately if needed.
+
+The synthetic recovery acceptance tests exercise a separately stored dated bundle, exact monetary values, graph relations, revision history and reopen. They also check that wrong passwords and tampered bundles create no vault, and restoring over an existing vault is refused without changing it. Rust/Python interoperability tests restore a native batch group and its members into the Python reference implementation. These checks verify application behavior; they do not certify that your personal backup destination or password copy is usable.
+
+Run `python -m unittest discover -s tests -p test_recovery.py -v` for the isolated drill. Build the native acceptance driver and run the full suite for cross-runtime recovery.

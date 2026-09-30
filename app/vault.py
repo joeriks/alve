@@ -418,7 +418,28 @@ class Vault:
         self.db.execute("INSERT INTO proposals VALUES (?,?)", (proposal["id"], canonical(proposal)))
         return proposal
 
+    def propose_batch(self, batch, grant, confirmation):
+        if not isinstance(batch, dict) or not isinstance(batch.get("proposals"), list):
+            raise Problem("Invalid prepared batch.")
+        result = []
+        for index, payload in enumerate(batch["proposals"]):
+            proposal = self.propose(payload, grant)
+            proposal["batchId"] = batch["batchId"]
+            proposal["batchTitle"] = batch["title"]
+            proposal["batchIndex"] = index
+            proposal["groupIntent"] = batch["group"]
+            proposal["qualityConfirmation"] = confirmation
+            self.db.execute("UPDATE proposals SET payload=? WHERE id=?", (canonical(proposal), proposal["id"]))
+            result.append(proposal)
+        return {"batchId": batch["batchId"], "proposals": result, "group": batch["group"]}
+
     def review(self, identifier, approve):
+        row = self.db.execute("SELECT payload FROM proposals WHERE id=?", (identifier,)).fetchone()
+        if row and json.loads(row[0]).get("batchId"):
+            raise Problem("Review the complete prepared batch together.", 409)
+        return self._review(identifier, approve)
+
+    def _review(self, identifier, approve):
         row = self.db.execute("SELECT payload FROM proposals WHERE id=?", (identifier,)).fetchone()
         if not row:
             raise Problem("Proposal not found.", 404)
@@ -449,25 +470,60 @@ class Vault:
                 or len(set(identifiers)) != len(identifiers) or not isinstance(action, str) or action not in {"approve", "reject"}):
             raise Problem("Use 1 to 50 unique proposal IDs and approve or reject.")
         group_title = None
+        group_content = None
         if "groupTitle" in data:
             if action != "approve" or len(identifiers) < 2:
                 raise Problem("A group is available only when approving at least two proposals.")
             group_title = text(data["groupTitle"], "group title", 200, True)
+        selected = []
         # Validate each pending proposal before any write, so a rejected batch does not
         # temporarily modify a proposal even inside callers that do not use mutate().
         for identifier in identifiers:
             row = self.db.execute("SELECT payload FROM proposals WHERE id=?", (identifier,)).fetchone()
             if not row or json.loads(row[0]).get("status") != "pending":
                 raise Problem("A selected proposal is missing or already reviewed.", 409)
-        reviews = [self.review(identifier, action == "approve") for identifier in identifiers]
+            selected.append(json.loads(row[0]))
+        batch_ids = {proposal.get("batchId") for proposal in selected}
+        if any(batch_ids) and (len(batch_ids) != 1 or None in batch_ids):
+            raise Problem("Review one complete prepared batch at a time.", 409)
+        if any(batch_ids):
+            batch_id = next(iter(batch_ids))
+            members = [proposal for proposal in self.rows("proposals") if proposal.get("batchId") == batch_id]
+            if any(proposal.get("status") != "pending" for proposal in members) or {proposal["id"] for proposal in members} != set(identifiers):
+                raise Problem("Select the complete prepared batch.", 409)
+            intent = selected[0].get("groupIntent")
+            if any(proposal.get("groupIntent") != intent for proposal in selected):
+                raise Problem("Prepared batch group intent is inconsistent.", 409)
+            if group_title is not None:
+                raise Problem("Prepared batches use their exact previewed group.", 409)
+            if not isinstance(intent, dict) or intent.get("relationType") != "belongs_to" or intent.get("relationDirection") != "member_to_group":
+                raise Problem("Invalid prepared group intent.", 409)
+            group_content = node_content({key: value for key, value in intent.items() if key not in {"relationType", "relationDirection"}})
+            group_title = group_content["title"] if action == "approve" else None
+        reviews = [self._review(identifier, action == "approve") for identifier in identifiers]
         group, relations = None, []
         if group_title is not None:
-            group = self.add_node({"title": group_title, "body": "Groups the selected memories.",
+            group = self.add_node(group_content or {"title": group_title, "body": "Groups the selected memories.",
                                    "type": "project", "kind": "record", "tags": [], "facts": [], "references": []})
             for review in reviews:
                 node = review["node"]
                 relations.append(self.add_relation({"fromId": node["id"], "toId": group["id"], "type": "belongs_to"}))
         return {"reviews": reviews, "group": group, "relations": relations}
+
+    def group_nodes(self, data):
+        if not isinstance(data, dict) or set(data) != {"nodeIds", "groupTitle"}:
+            raise Problem("Supply nodeIds and groupTitle only.")
+        ids = data.get("nodeIds")
+        if not isinstance(ids, list) or not 2 <= len(ids) <= 50 or any(not isinstance(i, str) for i in ids) or len(set(ids)) != len(ids):
+            raise Problem("Select 2 to 50 unique memory IDs.")
+        heads = self.heads()
+        if any(identifier not in heads or len(heads[identifier]) != 1 or heads[identifier][0].get("status") == "archived" for identifier in ids):
+            raise Problem("All selected memories must be active and non-conflicting.", 409)
+        group = self.add_node({"title": text(data.get("groupTitle"), "group title", 200, True),
+                               "body": "Groups the selected memories.", "type": "project", "kind": "record",
+                               "tags": [], "facts": [], "references": []})
+        relations = [self.add_relation({"fromId": identifier, "toId": group["id"], "type": "belongs_to"}) for identifier in ids]
+        return {"group": group, "relations": relations}
 
     def export(self):
         return {"format": "alve-poc-1", "vaultId": self.vault_id,

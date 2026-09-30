@@ -66,6 +66,31 @@ class RustInterop(unittest.TestCase):
         self.token = self.call(self.p, 'POST', '/api/unlock', {'password': PASSWORD})['token']
         self.assertEqual(self.owner('GET', '/api/graph')['nodes'][0]['title'], 'Python edit')
 
+    def test_prepared_batch_group_and_backup_restore_across_runtimes(self):
+        proposals = [{'content': {'title': f'Responsibility {i}', 'body': 'Synthetic batch recovery.',
+                                  'type': 'memory', 'kind': 'record', 'tags': ['responsibility']}} for i in range(5)]
+        preview = self.owner('POST', '/api/ai/proposals/prepare-batch', {'proposals': proposals, 'groupTitle': 'My responsibilities'})
+        submitted = self.owner('POST', '/api/ai/proposals/submit-batch', {'reviewToken': preview['reviewToken'], 'confirmation': CONFIRM})
+        ids = [p['id'] for p in submitted['proposals']]
+        self.owner('POST', '/api/proposals/review-batch', {'proposalIds': ids[:-1], 'action': 'approve'}, expected=409)
+        self.owner('POST', '/api/proposals/' + ids[0] + '/approve', expected=409)
+        approved = self.owner('POST', '/api/proposals/review-batch', {'proposalIds': ids, 'action': 'approve'})
+        self.assertEqual(len(approved['relations']), 5)
+        graph = self.owner('GET', '/api/graph')
+        bundle = self.owner('POST', '/api/bundle')['bundle']
+        v = Vault(self.directory / 'python-recovery/memory.alve')
+        try:
+            v.restore(bundle, PASSWORD)
+            self.assertEqual(v.vault_id, graph['vaultId'])
+            self.assertEqual({n['id']: n for n in v.graph()['nodes']}, {n['id']: n for n in graph['nodes']})
+            self.assertEqual(v.graph()['relations'], graph['relations'])
+            self.assertEqual(v.graph()['proposals'], [])
+            self.assertEqual(v.graph()['connections'], [])
+            v.lock(); v.unlock(PASSWORD)
+            self.assertEqual(len(v.graph()['nodes']), 6)
+        finally:
+            v.lock()
+
     def test_bundle_exchange_retains_conflicts_and_excludes_credentials(self):
         n = self.owner('POST', '/api/nodes', {'title': 'Original'})
         self.owner('POST', '/api/connections', {'name': 'Local client', 'nodeIds': [n['id']], 'permissions': ['read']})

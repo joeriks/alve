@@ -129,6 +129,22 @@ The POC tests the MCP-to-API read/proposal flow with synthetic requests. It does
 
 ## Reviewing related memories together
 
-An AI client may prepare several related memories, show all exact previews (including tags or no tags), and ask for one explicit confirmation covering that complete set. Each proposal still uses its own bound review token; changed or later proposals need fresh confirmation.
+Use MCP `prepare_memory_batch` (HTTP `POST /api/ai/proposals/prepare-batch`) for 2 to 50 related create/update candidates:
 
-In **Proposals**, select the memories to review and approve once. Optional shared grouping creates an owner-confirmed project node and `belongs_to` relations in the same atomic transaction. Tags are preserved exactly, not inferred from the AI conversation. Shared tags alone create no relation. The owner can inspect Tags / No tags before approval and search tags in the memory list. Existing saved memories are not modified by this workflow.
+```json
+{
+  "groupTitle": "My responsibilities",
+  "proposals": [
+    {"content": {"title": "Maintain the budget", "body": "Keep the agreed budget current.", "type": "memory", "kind": "commitment", "tags": ["responsibility"]}},
+    {"content": {"title": "Coordinate planning", "body": "Coordinate the next planning cycle.", "type": "memory", "kind": "commitment", "tags": ["responsibility"]}}
+  ]
+}
+```
+
+The response contains `batchId`, exact normalized proposal previews, a complete project-group preview and member-to-group `belongs_to` intent, plus one actor-bound review token expiring after ten minutes. Show the complete preview to the user, including tags, facts, references and the group. If anything changes, prepare again. One explicit confirmation must cover the whole set.
+
+Use MCP `propose_memory_batch` (HTTP `POST /api/ai/proposals/submit-batch`) with only the returned `reviewToken` and the quality `confirmation` object described above. The shared source basis and qualifications must apply to every item; use separate batches if they differ. Reference-based batches need references on every memory. The token is single-use after a successful save; a failed persistence attempt can be retried. Single and batch tokens are not interchangeable.
+
+Submission saves only pending proposals, all together. **Menu > Proposals** presents a batch with one **Approve all memories and group** action. Owner approval creates the exact previewed project group and relations in the same transaction. A stale update, revoked connection, missing member or failed write saves none of it. Individual or partial approval and group-title overrides are rejected. Rejecting a batch rejects every member together. Neither new memories nor their group are automatically shared with AI.
+
+Older independent proposals remain selectable for shared approval and optional owner grouping. Shared tags alone create no relation. Tags are preserved exactly. **Menu > Tags** and clicking a tag filter the memory list. **Menu > Group existing memories** links 2 to 50 active, non-conflicting saved memories to a new owner-created project, without changing their contents or AI scope.

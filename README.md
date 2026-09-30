@@ -52,7 +52,8 @@ Open **http://127.0.0.1:4765** and create a vault with a passphrase of at least 
 
 - Create and link concise memories with precise facts and references.
 - Grant an AI connection an explicit selection of nodes and permissions.
-- Review its proposals before they become confirmed memory.
+- Review exact AI proposal groups once before their memories and group become confirmed memory.
+- Browse clickable tags and group existing memories from the menu.
 - Download an encrypted bundle for backup or transfer to another installation.
 - Restore on a fresh installation, or merge a same-vault bundle into an existing unlocked installation.
 

@@ -531,7 +531,66 @@ impl Vault {
         )?;
         Ok(p)
     }
+    pub fn propose_batch(
+        &mut self,
+        batch: &Value,
+        grant: Option<&Value>,
+        confirmation: &Value,
+    ) -> Result<Value> {
+        let proposals = batch["proposals"]
+            .as_array()
+            .filter(|p| (2..=50).contains(&p.len()))
+            .ok_or_else(|| Error::new(422, "Invalid prepared batch."))?;
+        let batch_id = batch["batchId"]
+            .as_str()
+            .filter(|s| !s.is_empty() && s.len() <= 100)
+            .ok_or_else(|| Error::new(422, "Invalid prepared batch."))?;
+        let title = text(batch.get("title"), "group title", 200, true)?;
+        let group = batch
+            .get("group")
+            .filter(|g| g.is_object())
+            .ok_or_else(|| Error::new(422, "Invalid prepared batch."))?
+            .clone();
+        let expected = json!({"title":title,"type":"project","kind":"record","body":"Groups the selected memories.","tags":[],"facts":[],"references":[],"status":"active","relationType":"belongs_to","relationDirection":"member_to_group"});
+        if group != expected {
+            return Err(Error::new(422, "Invalid prepared batch."));
+        }
+        let mut result = Vec::new();
+        for (index, payload) in proposals.iter().enumerate() {
+            let mut proposal = self.propose(payload, grant)?;
+            proposal["batchId"] = json!(batch_id);
+            proposal["batchTitle"] = json!(title);
+            proposal["batchIndex"] = json!(index);
+            proposal["groupIntent"] = group.clone();
+            proposal["qualityConfirmation"] = confirmation.clone();
+            self.require()?.execute(
+                "UPDATE proposals SET payload=? WHERE id=?",
+                params![canonical(&proposal), proposal["id"].as_str()],
+            )?;
+            result.push(proposal);
+        }
+        Ok(json!({"batchId":batch_id,"proposals":result,"group":group}))
+    }
     pub fn review(&mut self, id: &str, approve: bool) -> Result<Value> {
+        let raw: Option<String> = self
+            .require()?
+            .query_row(
+                "SELECT payload FROM proposals WHERE id=?",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let proposal: Value =
+            serde_json::from_str(&raw.ok_or_else(|| Error::new(404, "Proposal not found."))?)?;
+        if proposal.get("batchId").is_some() {
+            return Err(Error::new(
+                409,
+                "Review the complete prepared batch together.",
+            ));
+        }
+        self.review_inner(id, approve)
+    }
+    fn review_inner(&mut self, id: &str, approve: bool) -> Result<Value> {
         let raw: Option<String> = self
             .require()?
             .query_row(
@@ -651,7 +710,7 @@ impl Vault {
                 "Use 1 to 50 unique proposal IDs and approve or reject.",
             ));
         }
-        let group = match data.get("groupTitle") {
+        let mut group = match data.get("groupTitle") {
             None => None,
             Some(value) => {
                 if action != "approve" || ids.len() < 2 {
@@ -663,6 +722,7 @@ impl Vault {
                 Some(text(Some(value), "group title", 200, true)?)
             }
         };
+        let mut selected = Vec::new();
         for id in &ids {
             let raw: Option<String> = self
                 .require()?
@@ -681,14 +741,88 @@ impl Vault {
                     "A selected proposal is missing or already reviewed.",
                 ));
             }
+            selected.push(value);
+        }
+        let batch_ids: std::collections::HashSet<Option<String>> = selected
+            .iter()
+            .map(|p| p.get("batchId").and_then(Value::as_str).map(str::to_owned))
+            .collect();
+        if batch_ids.iter().any(Option::is_some)
+            && (batch_ids.len() != 1 || batch_ids.contains(&None))
+        {
+            return Err(Error::new(
+                409,
+                "Review one complete prepared batch at a time.",
+            ));
+        }
+        let mut prepared_intent = None;
+        if let Some(Some(batch_id)) = batch_ids.iter().next() {
+            let members = self
+                .rows("proposals")?
+                .into_iter()
+                .filter(|p| p["batchId"].as_str() == Some(batch_id.as_str()))
+                .collect::<Vec<_>>();
+            if members.iter().any(|p| p["status"] != "pending")
+                || members.len() != ids.len()
+                || members
+                    .iter()
+                    .any(|p| !ids.iter().any(|id| p["id"].as_str() == Some(id.as_str())))
+            {
+                return Err(Error::new(409, "Select the complete prepared batch."));
+            }
+            let intent = selected[0]
+                .get("groupIntent")
+                .cloned()
+                .ok_or_else(|| Error::new(409, "Prepared batch group intent is inconsistent."))?;
+            if selected
+                .iter()
+                .any(|p| p.get("groupIntent") != Some(&intent))
+            {
+                return Err(Error::new(
+                    409,
+                    "Prepared batch group intent is inconsistent.",
+                ));
+            }
+            if group.is_some() {
+                return Err(Error::new(
+                    409,
+                    "Prepared batches use their exact previewed group.",
+                ));
+            }
+            if intent["relationType"] != "belongs_to"
+                || intent["relationDirection"] != "member_to_group"
+            {
+                return Err(Error::new(
+                    409,
+                    "Prepared batch group intent is inconsistent.",
+                ));
+            }
+            if action == "approve" {
+                group = Some(
+                    intent["title"]
+                        .as_str()
+                        .ok_or_else(|| {
+                            Error::new(409, "Prepared batch group intent is inconsistent.")
+                        })?
+                        .to_owned(),
+                );
+                prepared_intent = Some(intent);
+            }
         }
         let reviews = ids
             .iter()
-            .map(|id| self.review(id, action == "approve"))
+            .map(|id| self.review_inner(id, action == "approve"))
             .collect::<Result<Vec<_>>>()?;
         let mut relations = Vec::new();
         let group_node = if let Some(title) = group {
-            let node=self.add_node(&json!({"title":title,"body":"Groups the selected memories.","type":"project","kind":"record","tags":[],"facts":[],"references":[]}),None,None,"user")?;
+            let mut content = prepared_intent.unwrap_or_else(|| {
+                json!({"title":title,"body":"Groups the selected memories.","type":"project","kind":"record","tags":[],"facts":[],"references":[]})
+            });
+            if let Some(object) = content.as_object_mut() {
+                object.remove("relationType");
+                object.remove("relationDirection");
+            }
+            let node = self.add_node(&content, None, None, "user")?;
             for review in &reviews {
                 let member = &review["node"];
                 relations.push(self.add_relation(
@@ -700,6 +834,56 @@ impl Vault {
             None
         };
         Ok(json!({"reviews":reviews,"group":group_node,"relations":relations}))
+    }
+    pub fn group_nodes(&mut self, data: &Value) -> Result<Value> {
+        let object = data
+            .as_object()
+            .ok_or_else(|| Error::new(400, "Supply nodeIds and groupTitle only."))?;
+        if object.len() != 2
+            || !object.contains_key("nodeIds")
+            || !object.contains_key("groupTitle")
+        {
+            return Err(Error::new(400, "Supply nodeIds and groupTitle only."));
+        }
+        let ids = data["nodeIds"]
+            .as_array()
+            .ok_or_else(|| Error::new(400, "Select 2 to 50 unique memory IDs."))?;
+        if ids.len() < 2 || ids.len() > 50 {
+            return Err(Error::new(400, "Select 2 to 50 unique memory IDs."));
+        }
+        let ids = ids
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| Error::new(400, "Select 2 to 50 unique memory IDs."))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len() {
+            return Err(Error::new(400, "Select 2 to 50 unique memory IDs."));
+        }
+        let heads = self.heads()?;
+        if ids.iter().any(|id| {
+            heads
+                .get(id)
+                .map(|v| v.len() != 1 || v[0]["status"] == "archived")
+                .unwrap_or(true)
+        }) {
+            return Err(Error::new(
+                409,
+                "All selected memories must be active and non-conflicting.",
+            ));
+        }
+        let group=self.add_node(&json!({"title":text(data.get("groupTitle"),"group title",200,true)?,"body":"Groups the selected memories.","type":"project","kind":"record","tags":[],"facts":[],"references":[]}),None,None,"user")?;
+        let relations = ids
+            .iter()
+            .map(|id| {
+                self.add_relation(&json!({"fromId":id,"toId":group["id"],"type":"belongs_to"}))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(json!({"group":group,"relations":relations}))
     }
     pub fn record_quality(&mut self, id: &str, quality: &Value) -> Result<()> {
         let raw: String = self.require()?.query_row(
