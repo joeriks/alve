@@ -15,7 +15,7 @@ pub const SNAPSHOT: &[u8; 8] = b"ALVEPOC1";
 pub const BUNDLE: &[u8; 8] = b"ALVEBND1";
 
 pub fn derive(password: &str, salt: &[u8; 16]) -> Result<[u8; 32]> {
-    if password.trim().is_empty() || password.len() > 1024 {
+    if password.trim().is_empty() || password.chars().count() > 1024 {
         return Err(Error::new(400, "Invalid passphrase."));
     }
     let params =

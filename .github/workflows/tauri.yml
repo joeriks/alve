@@ -36,8 +36,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          architecture: 'x64'
       - run: cargo test -p alve-core --locked
       - run: cargo build -p alve-core --bins --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alve-core-${{ matrix.os }}
+          path: target/debug/alve-core-check.exe
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
       - run: cargo test -p alve --locked
@@ -52,3 +57,12 @@ jobs:
             target/release/alve-mcp.exe
             target/debug/alve-core-check.exe
           if-no-files-found: error
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}

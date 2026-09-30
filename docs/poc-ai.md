@@ -4,7 +4,7 @@ Alve does not require a particular model provider. A compatible AI client can ca
 
 ## Create a connection
 
-1. Unlock Alve in the browser.
+1. Unlock Alve in its desktop window (or the Python reference browser UI).
 2. Create at least one memory.
 3. Open **Connections**, select exactly the nodes this client may access, and choose search/read/propose permissions.
 4. Copy the one-time connection token. The stored grant contains a token hash, not the token itself.
@@ -13,7 +13,11 @@ The **Vaults** screen lists the current instance's vault and its active AI grant
 
 Connections are issued on each installation separately. Restore and peer bundles do not copy them. Revocation blocks future calls and blocks approval of that connection's pending proposals; it cannot retract data already read.
 
-## MCP stdio adapter
+## Native MCP companion
+
+For the Tauri app, use the compiled `alve-mcp` executable. See [native AI setup](tauri.md#ai-clients) for the client configuration. No Python runtime is needed. Both adapters expose the tools below.
+
+## Python reference MCP adapter
 
 Configure your AI client to launch Python with the absolute path to `app/mcp_bridge.py`. Set its environment to contain:
 

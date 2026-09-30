@@ -173,13 +173,19 @@ impl Vault {
         match result {
             Ok(value) => {
                 if let Err(error) = self.persist() {
-                    self.reload(&before)?;
+                    if let Err(rollback_error) = self.reload(&before) {
+                        self.lock();
+                        return Err(rollback_error);
+                    }
                     return Err(error);
                 }
                 Ok(value)
             }
             Err(error) => {
-                self.reload(&before)?;
+                if let Err(rollback_error) = self.reload(&before) {
+                    self.lock();
+                    return Err(rollback_error);
+                }
                 Err(error)
             }
         }
