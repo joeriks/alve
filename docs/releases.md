@@ -1,6 +1,6 @@
 # Preparing a Windows release
 
-CI builds the Windows installers but leaves the uploadable release files unsigned. Sign them locally with the release key; do not upload the private key or its password file.
+CI builds the Windows installers but leaves the uploadable release files unsigned. The release configuration bundles `alve-mcp.exe` beside the app. For local packaging, first build that companion with `cargo build -p alve-core --bin alve-mcp --release --locked`, then run `npm run build -- --bundles nsis --config src-tauri/tauri.release.conf.json`. Sign the installers locally with the release key; do not upload the private key or its password file.
 
 From the repository root, run:
 
@@ -19,3 +19,5 @@ The signing key and password are local files under `private-vaults/release-signi
 Users check manually through **Help > Check for updates**. Updates are offline by default because Alve does not contact an update service until the user asks. The updater verifies the signature and requires the manifest version to match the signed version. It locks the vault before handing control to the Windows installer; open editors block installation until their work is resolved.
 
 The installer is not Authenticode-signed. Windows SmartScreen may therefore show a warning even when the updater signature is valid. The updater signature verifies the downloaded update but does not replace Windows code-signing reputation checks.
+
+The ARM64 CI job also builds an older-version updater probe as an acceptance fixture. It is a separate Actions artifact, never a release asset. Install it in an isolated test directory with synthetic memory to exercise the published updater, then uninstall it. Publish both production architectures and the aggregate manifest together; keep the release in draft until its artifacts are validated.

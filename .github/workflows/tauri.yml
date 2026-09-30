@@ -71,10 +71,13 @@ jobs:
             $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
             $config.version = '0.2.99'
             $config | ConvertTo-Json -Depth 20 | Set-Content src-tauri/tauri.conf.json
-            npm run build -- --no-bundle
+            npm run build -- --bundles nsis --config src-tauri/tauri.release.conf.json
             if ($LASTEXITCODE -ne 0) { throw 'Updater probe build failed.' }
             New-Item -ItemType Directory -Path target/updater-probe -Force | Out-Null
             Copy-Item target/release/alve.exe target/updater-probe/alve.exe
+            $installer = Get-ChildItem target/release/bundle/nsis -Filter '*_0.2.99_*-setup.exe' -File | Select-Object -First 1
+            if (-not $installer) { throw 'Updater probe installer missing.' }
+            Copy-Item $installer.FullName target/updater-probe/Alve_updater_probe_setup.exe
           } finally {
             git restore src-tauri/Cargo.toml src-tauri/tauri.conf.json Cargo.lock
           }
@@ -82,7 +85,7 @@ jobs:
         if: matrix.os == 'windows-11-arm'
         with:
           name: alve-updater-probe-arm64
-          path: target/updater-probe/alve.exe
+          path: target/updater-probe/*
           if-no-files-found: error
 
       - uses: actions/cache/save@v4
