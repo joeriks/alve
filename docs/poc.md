@@ -4,6 +4,7 @@
 
 - English responsive browser UI backed by a local Python application.
 - Human-readable nodes, exact typed facts, references, typed graph relations, and local search.
+- Scoped AI search with combined text/tag/category/modification-date filters, lexical ranking, and bounded pagination; stable node IDs and changing revision IDs support precise retrieval.
 - Immutable revision history, archived nodes, persistent conflict heads, and explicit resolution.
 - SQLite in memory, serialized to an AES-256-GCM authenticated encrypted file after successful mutations.
 - Passphrase-derived keys using fixed scrypt parameters (`N=32768`, `r=8`, `p=1`), random salt, and fresh encryption nonces.

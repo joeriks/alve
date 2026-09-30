@@ -286,6 +286,23 @@ class HTTPTests(unittest.TestCase):
         self.admin = unlocked["token"]
         self.assertEqual(self.request("/api/ai/proposals", {"reviewToken": preview["reviewToken"], "confirmation": CONFIRMATION}, c["token"])[0], 409)
 
+    def test_structured_search_pagination_respects_scope(self):
+        allowed = []
+        for title in ("Travel budget", "Travel booking", "Hidden travel"):
+            _, n = self.request("/api/nodes", {"title": title, "tags": ["Travel", "Budget"], "kind": "decision"}, self.admin)
+            allowed.append(n)
+        _, c = self.request("/api/connections", {"name": "Search", "nodeIds": [n["id"] for n in allowed[:2]], "permissions": ["search"]}, self.admin)
+        path = "/api/ai/search?q=travel&tag=travel&tag=budget&kind=decision&updatedSince=2026-01-01T00%3A00%3A00Z&limit=1"
+        status, first = self.request(path, token=c["token"])
+        self.assertEqual(status, 200)
+        self.assertEqual(len(first["nodes"]), 1)
+        self.assertEqual(first["nextOffset"], 1)
+        _, second = self.request(path + "&offset=1", token=c["token"])
+        self.assertIsNone(second["nextOffset"])
+        self.assertEqual({first["nodes"][0]["id"], second["nodes"][0]["id"]}, {n["id"] for n in allowed[:2]})
+        self.assertEqual(self.request("/api/ai/search?updatedSince=2026-01-01", token=c["token"])[0], 400)
+        self.assertEqual(self.request("/api/ai/search?tags=misspelled", token=c["token"])[0], 400)
+
     def test_origin_host_and_auth_boundaries(self):
         self.assertEqual(self.request("/api/graph")[0], 401)
         self.assertEqual(self.request("/api/graph", token=self.admin, headers={"Origin": "https://evil.example"})[0], 403)
@@ -336,7 +353,7 @@ class HTTPTests(unittest.TestCase):
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25"}},
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "search_memory", "arguments": {"query": "MCP"}}},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "search_memory", "arguments": {"query": "MCP", "kind": "record", "includeArchived": False, "sort": "updated", "limit": 1}}},
             {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "prepare_memory", "arguments": {"content": {"title": "MCP proposal", "type": "memory", "kind": "record"}}}},
         ]
         run = subprocess.run([sys.executable, "-m", "app.mcp_bridge"], input="\n".join(json.dumps(m) for m in messages) + "\n",

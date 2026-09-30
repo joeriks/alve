@@ -112,9 +112,26 @@ FINAL_CONFIRMATION = {
     "additionalProperties": False,
 }
 
+SEARCH_INPUT = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string", "maxLength": 1000, "default": ""},
+        "tags": {"type": "array", "maxItems": 20, "items": {"type": "string", "minLength": 1, "maxLength": 60}},
+        "type": {"type": "string", "enum": ["memory", "project", "person", "event", "document"]},
+        "kind": {"type": "string", "enum": ["decision", "preference", "insight", "commitment", "record"]},
+        "updatedSince": {"type": "string", "format": "date-time"},
+        "updatedBefore": {"type": "string", "format": "date-time"},
+        "includeArchived": {"type": "boolean", "default": False},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+        "offset": {"type": "integer", "minimum": 0, "maximum": 5000, "default": 0},
+        "sort": {"type": "string", "enum": ["relevance", "updated"], "default": "relevance"},
+    },
+    "additionalProperties": False,
+}
+
 TOOLS = [
-    {"name": "search_memory", "description": "Search allowed human-readable memories. Results may be stale while peers are offline.",
-     "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, "required": ["query"]}},
+    {"name": "search_memory", "description": "Search authorized memories by text or structured fields. Tags are ANDed exact case-insensitive matches. Use nextOffset for pagination; results are a live local view and may change after edits or peer sync.",
+     "inputSchema": SEARCH_INPUT},
     {"name": "read_node", "description": "Read an allowed memory node and any conflicting versions.",
      "inputSchema": {"type": "object", "properties": {"node_id": {"type": "string"}}, "required": ["node_id"]}},
     {"name": "get_relations", "description": "Read only relations whose endpoints are both allowed.",
@@ -126,6 +143,44 @@ TOOLS = [
          "reviewToken": {"type": "string", "minLength": 1}, "confirmation": FINAL_CONFIRMATION},
          "required": ["reviewToken", "confirmation"], "additionalProperties": False}},
 ]
+
+
+def search_query(args):
+    """Translate the MCP search object into the API's repeated query parameters."""
+    allowed = {"query", "tags", "type", "kind", "updatedSince", "updatedBefore", "includeArchived", "limit", "offset", "sort"}
+    unexpected = set(args) - allowed
+    if unexpected:
+        raise ValueError("Unknown search argument.")
+    query = args.get("query", "")
+    if not isinstance(query, str) or len(query) > 1000:
+        raise ValueError("query must be a string of at most 1000 characters")
+    tags = args.get("tags", [])
+    if not isinstance(tags, list) or len(tags) > 20 or any(not isinstance(tag, str) or not tag or len(tag) > 60 for tag in tags):
+        raise ValueError("tags must contain at most 20 nonempty strings of at most 60 characters")
+    include_archived = args.get("includeArchived", False)
+    if type(include_archived) is not bool:
+        raise ValueError("includeArchived must be a boolean")
+    params = {"q": query, "tag": tags, "includeArchived": "true" if include_archived else "false"}
+    for key, values in (("type", {"memory", "project", "person", "event", "document"}),
+                        ("kind", {"decision", "preference", "insight", "commitment", "record"}),
+                        ("sort", {"relevance", "updated"})):
+        value = args.get(key)
+        if value is not None:
+            if not isinstance(value, str) or value not in values:
+                raise ValueError(f"Invalid search {key}")
+            params[key] = value
+    for key in ("updatedSince", "updatedBefore"):
+        value = args.get(key)
+        if value is not None:
+            if not isinstance(value, str):
+                raise ValueError(f"{key} must be an ISO 8601 timestamp")
+            params[key] = value
+    for key, default, minimum, maximum in (("limit", 20, 1, 100), ("offset", 0, 0, 5000)):
+        value = args.get(key, default)
+        if type(value) is not int or not minimum <= value <= maximum:
+            raise ValueError(f"{key} must be an integer between {minimum} and {maximum}")
+        params[key] = value
+    return urlencode(params, doseq=True)
 
 
 def handle(message):
@@ -159,7 +214,7 @@ def handle(message):
                 raise ValueError("Tool arguments must be an object")
             try:
                 if name == "search_memory":
-                    data = api("/api/ai/search?" + urlencode({"q": args.get("query", ""), "limit": args.get("limit", 20)}))
+                    data = api("/api/ai/search?" + search_query(args))
                 elif name in {"read_node", "get_relations"}:
                     node_id = args.get("node_id")
                     if not isinstance(node_id, str) or not node_id:

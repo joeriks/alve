@@ -55,6 +55,16 @@ Available tools:
 
 AI cannot grant itself permissions, directly create confirmed nodes, export the vault, or obtain the encryption key. Scope does not expand automatically through graph edges. New approved memories require a new connection grant if the client needs to read them; editing scopes is future work.
 
+## Search memory
+
+`search_memory` accepts optional text `query` (up to 1,000 characters; an empty query supports structured lookup), `tags` (up to 20 tags of up to 60 characters), `type`, `kind`, `updatedSince`, `updatedBefore`, `includeArchived`, `limit`, `offset`, and `sort`. Tags are repeated `tag` query parameters and all must match exactly, case-insensitively. Text matches case-insensitive substrings in titles, bodies, tags, fact labels and typed values, and reference titles. `type` and `kind` use the same categories as proposals.
+
+`updatedSince` is inclusive and `updatedBefore` is exclusive; both must be offset-aware ISO 8601 timestamps. `includeArchived` is a boolean and defaults to `false`. `limit` defaults to 20 (1–100), `offset` defaults to 0 (0–5,000), and `sort` defaults to `relevance`; use `updated` for modification-time order. Relevance ranks title matches, then tags, then body and structured facts, then newer changes, with stable IDs breaking ties. Responses include `nextOffset` when another page is available, `asOf` in UTC, and the sort used.
+
+Every returned node has a stable UUID `id` and a changing `revisionId`: use `id` to refer to the memory and `revisionId` for a specific version or update check. `updatedAt` records modification time. It is not an event date and does not prove that all peers are fresh; store event dates as typed date facts. Offset pagination observes a live local dataset, so rerun a search after edits or synchronization before relying on later pages.
+
+Search runs only against nodes authorized for the connection. It uses no vector index, model, or outgoing call.
+
 AI proposals use a mandatory two-step quality handshake. First call `prepare_memory` with the complete candidate. Its content must include a meaningful title (at most 120 characters), a body (at most 2,000 characters and 300 whitespace-separated words), explicit `type` (`memory`, `project`, `person`, `event`, or `document`), and `kind` (`decision`, `preference`, `insight`, `commitment`, or `record`). It also supports `tags`, typed `facts`, `references`, and `status`. Decimal money and quantity amounts are strings, and dates remain `YYYY-MM-DD`, so their values are not rounded or reformatted.
 
 `prepare_memory` returns `confirmation_required`, the candidate content, checks, instructions, and a review token valid for 600 seconds. It neither saves a node nor creates a pending proposal. The AI must show the user the exact returned preview — including categories, facts, references, and status — and state:
