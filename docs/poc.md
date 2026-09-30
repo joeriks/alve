@@ -1,4 +1,6 @@
-# Working POC
+# Python reference POC
+
+The desktop application now has a Tauri/Rust port; see [native operation](tauri.md). This page documents the retained Python reference runtime.
 
 ## Implemented
 

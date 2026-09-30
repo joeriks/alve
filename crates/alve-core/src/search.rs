@@ -181,3 +181,62 @@ pub fn search(graph: &Value, q: &Query) -> Result<Value> {
         json!({"vaultId":graph["vaultId"],"nodes":nodes,"conflicts":conflicts,"nextOffset":if offset+limit<matches.len(){Some(offset+limit)}else{None},"asOf":now(),"sort":sort}),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn node(id: &str, status: &str, date: &str) -> Value {
+        json!({"id":id,"title":"Budget","body":"Concise memory","type":"memory","kind":"decision","status":status,"tags":["Work","Budget"],"facts":[],"references":[],"updatedAt":date})
+    }
+    fn query(pairs: &[(&str, &str)]) -> Query {
+        let mut q = Query::new();
+        for (key, value) in pairs {
+            q.entry((*key).into()).or_default().push((*value).into());
+        }
+        q
+    }
+    #[test]
+    fn filters_categories_tags_dates_and_archives_before_pagination() {
+        let graph = json!({"vaultId":"v","nodes":[node("a","active","2026-09-29T12:00:00Z"),node("b","active","2026-09-30T12:00:00Z"),node("c","archived","2026-09-30T13:00:00Z")],"conflicts":[]});
+        let filters = query(&[
+            ("tag", "work"),
+            ("tag", "BUDGET"),
+            ("kind", "decision"),
+            ("updatedSince", "2026-09-29T12:00:00Z"),
+            ("updatedBefore", "2026-10-01T00:00:00Z"),
+            ("limit", "1"),
+        ]);
+        let first = search(&graph, &filters).unwrap();
+        assert_eq!(first["nodes"][0]["id"], "b");
+        assert_eq!(first["nextOffset"], 1);
+        let mut next = filters.clone();
+        next.insert("offset".into(), vec!["1".into()]);
+        assert_eq!(search(&graph, &next).unwrap()["nodes"][0]["id"], "a");
+        let mut archive = filters;
+        archive.insert("includeArchived".into(), vec!["true".into()]);
+        assert_eq!(search(&graph, &archive).unwrap()["nodes"][0]["id"], "c");
+    }
+    #[test]
+    fn search_finds_retained_conflict_versions_and_returns_the_conflict() {
+        let a = node("a", "active", "2026-09-30T12:00:00Z");
+        let mut b = a.clone();
+        b["title"] = json!("Alternative decision");
+        let graph =
+            json!({"vaultId":"v","nodes":[a],"conflicts":[{"nodeId":"a","versions":[a,b]}]});
+        let result = search(&graph, &query(&[("q", "Alternative")])).unwrap();
+        assert_eq!(result["nodes"].as_array().unwrap().len(), 1);
+        assert_eq!(result["conflicts"].as_array().unwrap().len(), 1);
+    }
+    #[test]
+    fn ambiguous_or_invalid_filters_fail_instead_of_being_ignored() {
+        let graph = json!({"vaultId":"v","nodes":[],"conflicts":[]});
+        for pairs in [
+            vec![("q", "one"), ("q", "two")],
+            vec![("limit", "-1")],
+            vec![("updatedSince", "2026-09-30")],
+            vec![("unknown", "value")],
+        ] {
+            assert!(search(&graph, &query(&pairs)).is_err());
+        }
+    }
+}

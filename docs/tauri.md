@@ -22,7 +22,7 @@ The app opens a locked screen first. Key derivation and owner API operations run
 
 The Rust core preserves the `ALVEPOC1` encrypted snapshot and `ALVEBND1` bundle formats, including AES-256-GCM, scrypt parameters, and immutable revision history. Compatibility checks exercise Python reading Rust snapshots, Rust reading Python edits, and backup/restore/merge across installations.
 
-For migration, download an encrypted bundle from the Python POC and restore it in a fresh native vault. Confirm the graph and exact values, and keep the old vault and an independent backup until verification is complete. Restored bundles exclude AI connections and pending proposals; issue fresh scoped connections in the native app. Alternatively, with the source app stopped, copy its `memory.alve` into a fresh native data directory and unlock with the same passphrase. Never overwrite an existing destination vault to migrate.
+For migration, download an encrypted bundle from the Python POC and restore it in a fresh native vault. Confirm the graph and exact values, and keep the old vault and an independent backup until verification is complete. Restored bundles exclude AI connections and pending proposals; issue fresh scoped connections in the native app. Alternatively, with the source app stopped, copy its `memory.alve` into a fresh native data directory and unlock with the same passphrase. Never overwrite an existing destination vault to migrate. A direct snapshot copy also preserves local connection grants and pending proposals; revoke copied grants and issue new tokens when moving to another device. Prefer a bundle when those local credentials should be excluded.
 
 Both runtimes use `.process-lock` in the data directory to prevent simultaneous writes. A locked vault still holds the process lock while its application is running. Synchronization and independent backups remain separate operations.
 
@@ -51,3 +51,9 @@ Windows uses `alve-mcp.exe`. Keep real tokens outside the repository. The bridge
 `cargo test -p alve-core` covers core failure paths. `cargo build -p alve-core --bins` builds the acceptance driver and MCP bridge. `python -m unittest discover -s tests -v` additionally exercises the Python reference and cross-runtime compatibility when the Rust driver is present. Python is required only for these reference tests, not for native runtime.
 
 Native CI builds Windows x64 and ARM64 executables and runs both Rust and interoperability checks. Those build artifacts are development binaries, not signed distribution releases. Native phones, automatic peer discovery/pairing, incremental LAN transport, multiple vaults in one instance, recovery keys, key rotation, and full calendar behavior are outside this port.
+
+## Native smoke verification
+
+On Windows ARM64, a compiled release executable was exercised in its actual WebView2 window using synthetic data. Creating a memory with an exact money fact, scoped native MCP search, prepare/confirm/owner approval, encrypted bundle export, HTTP origin and owner-route rejection, and lock/reopen all passed. Python/Rust snapshot and bundle interoperability also passed locally on both x64 and ARM64 executables.
+
+One instrumented ARM64 launch reached the locked screen in about 0.43 seconds. This is an observed local sample with WebView debugging enabled and cached system resources, not a startup guarantee or a mobile-device measurement.

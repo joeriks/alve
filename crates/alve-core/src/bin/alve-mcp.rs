@@ -54,6 +54,7 @@ fn call(name: &str, args: &Value) -> std::result::Result<Value, String> {
     match name {
         "search_memory" => {
             let a = args.as_object().ok_or("Arguments must be an object.")?;
+            validate_search_arguments(a)?;
             let mut query = url::form_urlencoded::Serializer::new(String::new());
             for (k, v) in a {
                 if k == "tags" {
@@ -99,6 +100,94 @@ fn call(name: &str, args: &Value) -> std::result::Result<Value, String> {
         "propose_memory" => api("/api/ai/proposals", Some(args)),
         _ => Err("Unknown tool.".into()),
     }
+}
+
+fn validate_search_arguments(
+    args: &serde_json::Map<String, Value>,
+) -> std::result::Result<(), String> {
+    const KEYS: &[&str] = &[
+        "query",
+        "tags",
+        "type",
+        "kind",
+        "updatedSince",
+        "updatedBefore",
+        "includeArchived",
+        "limit",
+        "offset",
+        "sort",
+    ];
+    if args.keys().any(|key| !KEYS.contains(&key.as_str())) {
+        return Err("Unknown search argument.".into());
+    }
+    if let Some(value) = args.get("query") {
+        if value
+            .as_str()
+            .filter(|text| text.chars().count() <= 1000)
+            .is_none()
+        {
+            return Err("query must be a string of at most 1000 characters.".into());
+        }
+    }
+    if let Some(value) = args.get("tags") {
+        let tags = value.as_array().ok_or("tags must be an array.")?;
+        if tags.len() > 20
+            || tags.iter().any(|tag| {
+                tag.as_str()
+                    .filter(|text| !text.is_empty() && text.chars().count() <= 60)
+                    .is_none()
+            })
+        {
+            return Err(
+                "tags must contain at most 20 nonempty strings of at most 60 characters.".into(),
+            );
+        }
+    }
+    for (key, allowed) in [
+        (
+            "type",
+            &["memory", "project", "person", "event", "document"][..],
+        ),
+        (
+            "kind",
+            &["decision", "preference", "insight", "commitment", "record"][..],
+        ),
+        ("sort", &["relevance", "updated"][..]),
+    ] {
+        if let Some(value) = args.get(key) {
+            if value
+                .as_str()
+                .filter(|text| allowed.contains(text))
+                .is_none()
+            {
+                return Err(format!("Invalid search {key}."));
+            }
+        }
+    }
+    for key in ["updatedSince", "updatedBefore"] {
+        if let Some(value) = args.get(key) {
+            if value.as_str().is_none() {
+                return Err(format!("{key} must be an ISO 8601 timestamp."));
+            }
+        }
+    }
+    if let Some(value) = args.get("includeArchived") {
+        if !value.is_boolean() {
+            return Err("includeArchived must be a boolean.".into());
+        }
+    }
+    for (key, min, max) in [("limit", 1, 100), ("offset", 0, 5000)] {
+        if let Some(value) = args.get(key) {
+            if value
+                .as_i64()
+                .filter(|number| *number >= min && *number <= max)
+                .is_none()
+            {
+                return Err(format!("{key} must be an integer between {min} and {max}."));
+            }
+        }
+    }
+    Ok(())
 }
 fn handle(m: Value) -> Option<Value> {
     if m.get("id").is_none() {
@@ -157,5 +246,50 @@ fn main() {
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn initialize_returns_bounded_protocol_contract() {
+        let response =
+            handle(json!({"jsonrpc":"2.0","id":7,"method":"initialize","params":{}})).unwrap();
+        assert_eq!(response["result"]["protocolVersion"], "2025-11-25");
+        assert_eq!(
+            response["result"]["serverInfo"]["name"],
+            "alve-local-memory"
+        );
+    }
+
+    #[test]
+    fn tools_list_exposes_exactly_five_tools() {
+        let response =
+            handle(json!({"jsonrpc":"2.0","id":8,"method":"tools/list","params":{}})).unwrap();
+        let tools = response["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 5);
+        assert_eq!(tools[0]["name"], "search_memory");
+        assert_eq!(tools[4]["name"], "propose_memory");
+    }
+
+    #[test]
+    fn malformed_json_rpc_returns_invalid_request() {
+        let response = handle(json!({"jsonrpc":"1.0","id":"bad","method":"ping"})).unwrap();
+        assert_eq!(response["error"]["code"], -32600);
+        assert_eq!(response["id"], "bad");
+    }
+
+    #[test]
+    fn search_schema_rejects_unknown_and_wrong_scalar_types() {
+        let unknown = serde_json::from_value(json!({"unexpected":true})).unwrap();
+        assert!(validate_search_arguments(&unknown).is_err());
+        let string_boolean = serde_json::from_value(json!({"includeArchived":"true"})).unwrap();
+        assert!(validate_search_arguments(&string_boolean).is_err());
+        let negative_limit = serde_json::from_value(json!({"limit":-1})).unwrap();
+        assert!(validate_search_arguments(&negative_limit).is_err());
+        let negative_offset = serde_json::from_value(json!({"offset":-1})).unwrap();
+        assert!(validate_search_arguments(&negative_offset).is_err());
     }
 }

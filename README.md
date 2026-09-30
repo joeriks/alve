@@ -8,7 +8,7 @@ Your memory lives on your devices. AI clients use a local, permission-controlled
 
 ## Current status
 
-The desktop POC is being ported to Tauri 2 with a Rust core and a bundled HTML/CSS/JavaScript interface. It implements encrypted persistence, graph editing, typed facts, scoped AI access, reviewed proposals, and manual encrypted bundle exchange with retained conflicts. A native `alve-mcp` stdio companion connects AI clients to the local Rust API. The Python POC remains as a reference implementation and interoperability test fixture.
+The desktop POC runs in Tauri 2 with a Rust core and a bundled HTML/CSS/JavaScript interface. It implements encrypted persistence, graph editing, typed facts, scoped AI access, reviewed proposals, and manual encrypted bundle exchange with retained conflicts. A native `alve-mcp` stdio companion connects AI clients to the local Rust API. The Python POC remains as a reference implementation and interoperability test fixture.
 
 It is not a production security implementation. Native phone apps, automatic LAN/hotspot transport, secure device pairing, SQLCipher integration, attachments, calendar recurrence/reminders, and app-initiated model inference remain future work.
 
@@ -84,7 +84,7 @@ The original sketch above is separate from the working POC served by `python -m 
 
 ## Decisions still open
 
-- First desktop and mobile operating systems, and application framework.
+- Mobile operating systems and native phone integration. Desktop uses Tauri 2 and Rust.
 - Concrete synchronization protocol, cryptographic libraries, and key recovery format.
 - Retention periods for working material, historical revisions, and deletion records.
 - Which AI clients and local model runtimes to support first.
