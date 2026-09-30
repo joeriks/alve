@@ -8,11 +8,28 @@ Your memory lives on your devices. AI clients use a local, permission-controlled
 
 ## Current status
 
-This repository now includes a working local proof of concept alongside the original specifications and UI sketch. The POC implements encrypted persistence, graph editing, typed facts, scoped AI access, reviewed proposals, an MCP bridge, and manual encrypted bundle exchange with retained conflicts.
+The desktop POC is being ported to Tauri 2 with a Rust core and a bundled HTML/CSS/JavaScript interface. It implements encrypted persistence, graph editing, typed facts, scoped AI access, reviewed proposals, and manual encrypted bundle exchange with retained conflicts. A native `alve-mcp` stdio companion connects AI clients to the local Rust API. The Python POC remains as a reference implementation and interoperability test fixture.
 
 It is not a production security implementation. Native phone apps, automatic LAN/hotspot transport, secure device pairing, SQLCipher integration, attachments, calendar recurrence/reminders, and app-initiated model inference remain future work.
 
-## Run the POC
+## Run the native desktop app
+
+Building requires Node.js, Rust, and the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/). On Windows, install the MSVC C++ build tools and WebView2. The compiled app and native MCP companion do not require Python, Node.js, or Cargo at runtime.
+
+```sh
+npm ci
+npm run dev
+```
+
+Build a release executable with `npm run build -- --no-bundle`. On Windows it is `target/release/alve.exe`. Build the MCP companion with `cargo build -p alve-core --bin alve-mcp --release --locked`.
+
+The UI opens directly in the desktop window. The locked screen does not decrypt the vault or start a model. Unlock performs the passphrase derivation on a worker thread; app startup and unlocking are separate operations. Startup latency must be measured on real devices; no one-second guarantee is claimed.
+
+The default vault is in the operating system's Alve application-data directory. `ALVE_DATA_DIR` selects another directory; `ALVE_API_PORT` selects the loopback AI port. The native app exposes only scoped AI routes over HTTP; owner operations use local Tauri IPC. **AI contract** shows the active HTTP endpoint. If the preferred port is busy, the app chooses an available loopback port.
+
+See [native operation and migration](docs/tauri.md). Native phone builds and automatic LAN synchronization remain future work.
+
+## Run the Python reference POC
 
 Requires Python 3.12 or newer with SQLite serialization support.
 
@@ -27,7 +44,7 @@ python -m pip install -r requirements.txt
 python -m app --data-dir private-vaults/poc
 ```
 
-On Windows, after dependencies are available, `./start-alve.ps1` selects the local virtual environment or bundled Codex Python when available. It also accepts `-PythonPath`, `-Port`, and `-DataDirectory`.
+On Windows, `./start-python-poc.ps1` selects the local virtual environment or bundled Codex Python when available. It accepts `-PythonPath`, `-Port`, and `-DataDirectory`. `./start-alve.ps1` launches the compiled native app.
 
 Open **http://127.0.0.1:4765** and create a vault with a passphrase of at least 12 characters. The application listens only on this computer. No account or external network call is needed.
 

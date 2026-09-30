@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use fs2::FileExt;
 use rand::RngCore;
-use rusqlite::{params, Connection, DatabaseName, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -83,7 +83,7 @@ impl Vault {
             let raw = std::fs::read(&self.path)?;
             let (id, salt, key, bytes) = crypto::decrypt(&raw, SNAPSHOT, password)?;
             let mut db = Connection::open_in_memory()?;
-            db.deserialize_read_exact(DatabaseName::Main, bytes.as_slice(), bytes.len(), false)?;
+            db.deserialize_read_exact("main", bytes.as_slice(), bytes.len(), false)?;
             db.execute_batch("PRAGMA temp_store=MEMORY;PRAGMA journal_mode=MEMORY;")?;
             if db.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))? != "ok" {
                 return Err(Error::new(400, "Vault database integrity check failed."));
@@ -154,7 +154,7 @@ impl Vault {
     }
     fn persist(&self) -> Result<()> {
         let db = self.require()?;
-        let bytes = db.serialize(DatabaseName::Main)?.to_vec();
+        let bytes = db.serialize("main")?.to_vec();
         let raw = crypto::envelope(
             SNAPSHOT,
             self.id()?,
@@ -168,7 +168,7 @@ impl Vault {
     where
         F: FnOnce(&mut Self) -> Result<T>,
     {
-        let before = self.require()?.serialize(DatabaseName::Main)?.to_vec();
+        let before = self.require()?.serialize("main")?.to_vec();
         let result = action(self);
         match result {
             Ok(value) => {
@@ -186,7 +186,7 @@ impl Vault {
     }
     fn reload(&mut self, bytes: &[u8]) -> Result<()> {
         let mut db = Connection::open_in_memory()?;
-        db.deserialize_read_exact(DatabaseName::Main, bytes, bytes.len(), false)?;
+        db.deserialize_read_exact("main", bytes, bytes.len(), false)?;
         db.execute_batch("PRAGMA temp_store=MEMORY;PRAGMA journal_mode=MEMORY;")?;
         self.db = Some(db);
         Ok(())
@@ -480,10 +480,12 @@ impl Vault {
         Ok(json!({"revoked":true}))
     }
     pub fn propose(&mut self, data: &Value, grant: Option<&Value>) -> Result<Value> {
-        let action = data
-            .get("action")
-            .and_then(Value::as_str)
-            .unwrap_or("create");
+        let action = crate::validation::enum_field(
+            data.as_object()
+                .ok_or_else(|| Error::new(400, "Invalid proposal."))?,
+            "action",
+            "create",
+        )?;
         if !["create", "update"].contains(&action) {
             return Err(Error::new(
                 400,

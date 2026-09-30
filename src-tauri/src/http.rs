@@ -14,6 +14,56 @@ use std::{
 };
 
 static SERVICE: OnceLock<SocketAddr> = OnceLock::new();
+const REJECTED: &str = "Request rejected.";
+
+/// Validates the browser/loopback boundary before a request reaches the core.
+/// An absent Origin is permitted for local CLI clients carrying a bearer token;
+/// any supplied Origin must be one exact local origin.
+fn validate_boundary(
+    headers: &HeaderMap,
+    method: &Method,
+    peer: SocketAddr,
+    port: u16,
+) -> Result<(), StatusCode> {
+    if peer.ip() != IpAddr::V4(Ipv4Addr::LOCALHOST)
+        || headers.get_all("host").iter().count() != 1
+        || headers.get_all("authorization").iter().count() != 1
+        || headers.get_all("origin").iter().count() > 1
+    {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let host = headers
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::FORBIDDEN)?;
+    if host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if let Some(origin) = headers.get("origin") {
+        let origin = origin.to_str().map_err(|_| StatusCode::FORBIDDEN)?;
+        if origin != format!("http://127.0.0.1:{port}")
+            && origin != format!("http://localhost:{port}")
+        {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
+    if matches!(
+        headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()),
+        Some("cross-site") | Some("same-site")
+    ) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if *method == Method::POST
+        && headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.split(';').next().unwrap_or("").trim())
+            != Some("application/json")
+    {
+        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+    Ok(())
+}
 pub fn service_info() -> Value {
     json!({"httpEndpoint": SERVICE.get().map(|a| format!("http://{a}")), "aiOnly": true})
 }
@@ -52,58 +102,22 @@ async fn ai(
     uri: axum::http::Uri,
     body: Bytes,
 ) -> Response {
-    if headers.get_all("host").iter().count() != 1
-        || headers.get_all("authorization").iter().count() != 1
-        || headers.get_all("origin").iter().count() > 1
-    {
-        return response(StatusCode::FORBIDDEN, "Request rejected.");
+    let port = match SERVICE.get() {
+        Some(address) => address.port(),
+        None => return response(StatusCode::SERVICE_UNAVAILABLE, REJECTED),
+    };
+    if body.len() > 23 * 1024 * 1024 {
+        return response(StatusCode::PAYLOAD_TOO_LARGE, REJECTED);
     }
-    if method == Method::POST
-        && headers
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.split(';').next().unwrap_or("").trim())
-            != Some("application/json")
-    {
-        return response(StatusCode::UNSUPPORTED_MEDIA_TYPE, "Use application/json.");
-    }
-    let origin = headers.get("origin").and_then(|v| v.to_str().ok());
-    let host = headers
-        .get("host")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    let allowed_host = SERVICE
-        .get()
-        .map(|a| {
-            [
-                format!("127.0.0.1:{}", a.port()),
-                format!("localhost:{}", a.port()),
-            ]
-            .contains(&host.to_string())
-        })
-        .unwrap_or(false);
-    let origin_ok = origin
-        .map(|o| {
-            SERVICE
-                .get()
-                .map(|a| {
-                    o == format!("http://127.0.0.1:{}", a.port())
-                        || o == format!("http://localhost:{}", a.port())
-                })
-                .unwrap_or(false)
-        })
-        .unwrap_or(true);
-    let fetch_ok = !matches!(
-        headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()),
-        Some("cross-site") | Some("same-site")
-    );
-    if peer.ip() != IpAddr::V4(Ipv4Addr::LOCALHOST)
-        || !allowed_host
-        || !origin_ok
-        || !fetch_ok
-        || body.len() > 23 * 1024 * 1024
-    {
-        return response(StatusCode::FORBIDDEN, "Request rejected.");
+    if let Err(status) = validate_boundary(&headers, &method, peer, port) {
+        return response(
+            status,
+            if status == StatusCode::UNSUPPORTED_MEDIA_TYPE {
+                "Use application/json."
+            } else {
+                REJECTED
+            },
+        );
     }
     let token = headers
         .get("authorization")
@@ -153,4 +167,99 @@ fn json_response(status: StatusCode, value: Value) -> Response {
         axum::Json(value),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{header, HeaderValue};
+
+    const PORT: u16 = 4765;
+    fn peer() -> SocketAddr {
+        SocketAddr::from((Ipv4Addr::LOCALHOST, 41000))
+    }
+    fn local_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("127.0.0.1:4765"));
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer test-token"),
+        );
+        headers
+    }
+    fn valid(headers: &HeaderMap, method: Method, peer: SocketAddr) -> Result<(), StatusCode> {
+        validate_boundary(headers, &method, peer, PORT)
+    }
+
+    #[test]
+    fn permits_exact_local_cli_request() {
+        assert_eq!(valid(&local_headers(), Method::GET, peer()), Ok(()));
+    }
+
+    #[test]
+    fn rejects_foreign_and_null_origins() {
+        for origin in ["https://evil.example", "null"] {
+            let mut h = local_headers();
+            h.insert(header::ORIGIN, HeaderValue::from_static(origin));
+            assert_eq!(valid(&h, Method::GET, peer()), Err(StatusCode::FORBIDDEN));
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_authorization_and_host() {
+        let mut auth = local_headers();
+        auth.append(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer second"),
+        );
+        assert_eq!(
+            valid(&auth, Method::GET, peer()),
+            Err(StatusCode::FORBIDDEN)
+        );
+        let mut host = local_headers();
+        host.append(header::HOST, HeaderValue::from_static("localhost:4765"));
+        assert_eq!(
+            valid(&host, Method::GET, peer()),
+            Err(StatusCode::FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn rejects_foreign_host_peer_and_cross_site_fetch() {
+        let mut host = local_headers();
+        host.insert(header::HOST, HeaderValue::from_static("evil.example"));
+        assert_eq!(
+            valid(&host, Method::GET, peer()),
+            Err(StatusCode::FORBIDDEN)
+        );
+        assert_eq!(
+            valid(
+                &local_headers(),
+                Method::GET,
+                SocketAddr::from(([10, 0, 0, 8], 9000))
+            ),
+            Err(StatusCode::FORBIDDEN)
+        );
+        let mut fetch = local_headers();
+        fetch.insert("sec-fetch-site", HeaderValue::from_static("cross-site"));
+        assert_eq!(
+            valid(&fetch, Method::GET, peer()),
+            Err(StatusCode::FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn rejects_non_json_post_and_malformed_origin() {
+        let h = local_headers();
+        assert_eq!(
+            valid(&h, Method::POST, peer()),
+            Err(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+        );
+        let mut malformed = local_headers();
+        malformed.insert(header::ORIGIN, HeaderValue::from_bytes(b"\xff").unwrap());
+        assert_eq!(
+            valid(&malformed, Method::GET, peer()),
+            Err(StatusCode::FORBIDDEN)
+        );
+    }
 }

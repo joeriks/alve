@@ -37,10 +37,12 @@ impl QualityGate {
         {
             return Err(Error::new(422,"Condense into one memory: heading at most 120 characters; body at most 300 words and 2,000 characters. Use references for longer material."));
         }
-        let action = data
-            .get("action")
-            .and_then(Value::as_str)
-            .unwrap_or("create");
+        let action = crate::validation::enum_field(
+            data.as_object()
+                .ok_or_else(|| Error::new(400, "Invalid proposal."))?,
+            "action",
+            "create",
+        )?;
         if !["create", "update"].contains(&action) {
             return Err(Error::new(400, "Use create or update."));
         }

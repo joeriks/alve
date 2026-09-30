@@ -35,14 +35,8 @@ pub fn node_content(data: &Value) -> Result<Value> {
     let object = data
         .as_object()
         .ok_or_else(|| Error::new(400, "Node content must be an object."))?;
-    let kind = object
-        .get("kind")
-        .and_then(Value::as_str)
-        .unwrap_or("record");
-    let typ = object
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or("memory");
+    let kind = enum_field(object, "kind", "record")?;
+    let typ = enum_field(object, "type", "memory")?;
     if !KINDS.contains(&kind) || !TYPES.contains(&typ) {
         return Err(Error::new(400, "Unsupported node type or memory kind."));
     }
@@ -54,10 +48,7 @@ pub fn node_content(data: &Value) -> Result<Value> {
     if refs.len() > 20 {
         return Err(Error::new(400, "Invalid references."));
     }
-    let status = object
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or("active");
+    let status = enum_field(object, "status", "active")?;
     if !["active", "archived"].contains(&status) {
         return Err(Error::new(400, "Invalid node status."));
     }
@@ -84,6 +75,18 @@ fn array<'a>(value: Option<&'a Value>, message: &str) -> Result<&'a Vec<Value>> 
 }
 static EMPTY: Vec<Value> = Vec::new();
 
+pub fn enum_field<'a>(
+    object: &'a Map<String, Value>,
+    key: &str,
+    default: &'a str,
+) -> Result<&'a str> {
+    match object.get(key) {
+        None => Ok(default),
+        Some(Value::String(value)) => Ok(value),
+        _ => Err(Error::new(400, format!("Invalid {key}."))),
+    }
+}
+
 fn text_or_empty(value: Option<&Value>, label: &str, maximum: usize) -> Result<String> {
     match value {
         None => Ok(String::new()),
@@ -101,7 +104,7 @@ fn clean_reference(reference: &Value) -> Result<Value> {
         Value::String(text(object.get("title"), "reference title", 200, true)?),
     );
     if let Some(url) = object.get("url") {
-        if !url.is_null() && !url.as_str().unwrap_or("").is_empty() {
+        if !url.is_null() && url != "" {
             let clean = text(Some(url), "reference URL", 2000, true)?;
             if !clean.starts_with("http://") && !clean.starts_with("https://") {
                 return Err(Error::new(400, "Reference URLs must use HTTP or HTTPS."));
@@ -128,10 +131,7 @@ pub fn validate_facts(value: Option<&Value>) -> Result<Value> {
             return Err(Error::new(400, "Fact keys must be unique within a node."));
         }
         let label = text(object.get("label"), "fact label", 120, true)?;
-        let precision = object
-            .get("precision")
-            .and_then(Value::as_str)
-            .unwrap_or("exact");
+        let precision = enum_field(object, "precision", "exact")?;
         if !["exact", "approximate", "estimated"].contains(&precision) {
             return Err(Error::new(400, "Invalid fact precision."));
         }

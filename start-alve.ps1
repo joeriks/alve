@@ -1,29 +1,14 @@
 param(
-    [string]$PythonPath = '',
-    [int]$Port = 4765,
-    [string]$DataDirectory = 'private-vaults/poc'
+    [int]$Port = 4785,
+    [string]$DataDirectory = 'private-vaults/native',
+    [string]$ExecutablePath = ''
 )
-
 $ErrorActionPreference = 'Stop'
-$alveRoot = $PSScriptRoot
-if (-not $PythonPath) {
-    $alveCandidates = @(
-        (Join-Path $alveRoot '.venv/Scripts/python.exe'),
-        (Join-Path $env:USERPROFILE '.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe')
-    )
-    $PythonPath = $alveCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    if (-not $PythonPath) {
-        $alvePythonCommand = Get-Command python -ErrorAction SilentlyContinue
-        if ($alvePythonCommand) { $PythonPath = $alvePythonCommand.Source }
-    }
+if (-not $ExecutablePath) {
+    $alveCandidates = @((Join-Path $PSScriptRoot 'target/release/alve.exe'), (Join-Path $PSScriptRoot 'target/debug/alve.exe'))
+    $ExecutablePath = $alveCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }
-if (-not $PythonPath) {
-    throw 'Install Python 3.12+, create .venv, and install requirements.txt, or provide -PythonPath.'
-}
-Push-Location -LiteralPath $alveRoot
-try {
-    & $PythonPath -m app --port $Port --data-dir $DataDirectory
-    if ($LASTEXITCODE -ne 0) { throw 'Alve exited with an error. Check Python dependencies and the data-directory lock.' }
-} finally {
-    Pop-Location
-}
+if (-not $ExecutablePath) { throw 'Build Alve with npm ci and npm run build -- --no-bundle, or provide -ExecutablePath to a downloaded native build.' }
+$env:ALVE_DATA_DIR = if ([IO.Path]::IsPathRooted($DataDirectory)) { $DataDirectory } else { Join-Path $PSScriptRoot $DataDirectory }
+$env:ALVE_API_PORT = [string]$Port
+& $ExecutablePath

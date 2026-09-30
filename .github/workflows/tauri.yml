@@ -1,7 +1,12 @@
 name: Tauri native acceptance
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+concurrency:
+  group: tauri-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -20,6 +25,13 @@ jobs:
           node-version: '24'
           cache: npm
       - run: rustup update stable --no-self-update
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
       - run: npm ci
       - uses: actions/setup-python@v5
         with:
@@ -38,4 +50,5 @@ jobs:
           path: |
             target/release/alve.exe
             target/release/alve-mcp.exe
+            target/debug/alve-core-check.exe
           if-no-files-found: error
