@@ -8,6 +8,45 @@ fn request(e: &mut Engine, method: &str, path: &str, data: Value, token: &str) -
 }
 
 #[test]
+fn update_lock_revokes_session_and_preserves_acknowledged_memory() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut e = Engine::new(dir.path().join("memory.alve")).unwrap();
+    let token = request(
+        &mut e,
+        "POST",
+        "/api/unlock",
+        json!({"password":PASSWORD,"create":true}),
+        "",
+    )["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    request(
+        &mut e,
+        "POST",
+        "/api/nodes",
+        json!({"title":"Saved before update","body":"A persisted synthetic memory."}),
+        &token,
+    );
+    e.lock_for_update();
+    assert_eq!(e.vault.status()["unlocked"], false);
+    assert!(e.request("GET", "/api/graph", &json!({}), &token).is_err());
+    let reopened = request(
+        &mut e,
+        "POST",
+        "/api/unlock",
+        json!({"password":PASSWORD}),
+        "",
+    )["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(e.request("GET", "/api/graph", &json!({}), &token).is_err());
+    let graph = request(&mut e, "GET", "/api/graph", json!({}), &reopened);
+    assert_eq!(graph["nodes"][0]["title"], "Saved before update");
+}
+
+#[test]
 fn encrypted_snapshot_tamper_and_failed_save_preserve_memory() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("memory.alve");

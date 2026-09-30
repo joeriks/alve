@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "../target/release/alve-mcp.exe": "alve-mcp.exe"
+    }
+  }
+}

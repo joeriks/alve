@@ -49,7 +49,7 @@ jobs:
       - run: cargo test -p alve --locked
       - run: cargo build -p alve-core --bin alve-mcp --release --locked
       - run: npm run check
-      - run: npm run build -- --bundles nsis
+      - run: npm run build -- --bundles nsis --config src-tauri/tauri.release.conf.json
       - uses: actions/upload-artifact@v4
         with:
           name: alve-${{ matrix.os }}
@@ -58,6 +58,31 @@ jobs:
             target/release/alve.exe
             target/release/alve-mcp.exe
             target/debug/alve-core-check.exe
+          if-no-files-found: error
+
+      # Acceptance fixture only: never upload this older-version executable to Releases.
+      - name: Build older updater probe
+        if: matrix.os == 'windows-11-arm'
+        shell: pwsh
+        run: |
+          try {
+            $manifest = Get-Content src-tauri/Cargo.toml -Raw
+            $manifest.Replace('version = "0.3.0"', 'version = "0.2.99"') | Set-Content src-tauri/Cargo.toml
+            $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+            $config.version = '0.2.99'
+            $config | ConvertTo-Json -Depth 20 | Set-Content src-tauri/tauri.conf.json
+            npm run build -- --no-bundle
+            if ($LASTEXITCODE -ne 0) { throw 'Updater probe build failed.' }
+            New-Item -ItemType Directory -Path target/updater-probe -Force | Out-Null
+            Copy-Item target/release/alve.exe target/updater-probe/alve.exe
+          } finally {
+            git restore src-tauri/Cargo.toml src-tauri/tauri.conf.json Cargo.lock
+          }
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'windows-11-arm'
+        with:
+          name: alve-updater-probe-arm64
+          path: target/updater-probe/alve.exe
           if-no-files-found: error
 
       - uses: actions/cache/save@v4
