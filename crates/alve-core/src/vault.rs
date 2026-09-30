@@ -438,17 +438,17 @@ impl Vault {
         let perms = data["permissions"].as_array().ok_or_else(|| {
             Error::new(
                 400,
-                "Only search, read, and propose permissions are supported.",
+                "Only search, read, propose, and run permissions are supported.",
             )
         })?;
         if perms.is_empty()
             || perms
                 .iter()
-                .any(|x| !matches!(x.as_str(), Some("search" | "read" | "propose")))
+                .any(|x| !matches!(x.as_str(), Some("search" | "read" | "propose" | "run")))
         {
             return Err(Error::new(
                 400,
-                "Only search, read, and propose permissions are supported.",
+                "Only search, read, propose, and run permissions are supported.",
             ));
         }
         let token_value = token();
@@ -485,6 +485,48 @@ impl Vault {
         )?;
         Ok(json!({"revoked":true}))
     }
+    pub(crate) fn meta(&self, key: &str) -> Result<Option<Value>> {
+        let raw: Option<String> = self
+            .require()?
+            .query_row("SELECT value FROM meta WHERE key=?", params![key], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        raw.map(|s| serde_json::from_str(&s).map_err(Into::into))
+            .transpose()
+    }
+    pub(crate) fn set_meta(&mut self, key: &str, value: &Value) -> Result<()> {
+        self.require()?.execute("INSERT INTO meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![key, canonical(value)])?;
+        Ok(())
+    }
+    pub(crate) fn require_agent_insert(&mut self, proposal: &Value) -> Result<()> {
+        self.require()?.execute(
+            "INSERT INTO proposals VALUES (?,?)",
+            params![proposal["id"].as_str(), canonical(proposal)],
+        )?;
+        Ok(())
+    }
+    pub(crate) fn proposal(&self, id: &str) -> Result<Value> {
+        let raw: Option<String> = self
+            .require()?
+            .query_row(
+                "SELECT payload FROM proposals WHERE id=?",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        serde_json::from_str(&raw.ok_or_else(|| Error::new(404, "Proposal not found."))?)
+            .map_err(Into::into)
+    }
+    pub(crate) fn connection(&self, id: &str) -> Result<Value> {
+        self.rows("connections")?
+            .into_iter()
+            .find(|c| c["id"] == id)
+            .ok_or_else(|| Error::new(403, "The report connection is no longer authorized."))
+    }
+    pub(crate) fn review_agent_inner(&mut self, id: &str, approve: bool) -> Result<Value> {
+        self.review_inner(id, approve)
+    }
     pub fn propose(&mut self, data: &Value, grant: Option<&Value>) -> Result<Value> {
         let action = crate::validation::enum_field(
             data.as_object()
@@ -499,6 +541,27 @@ impl Vault {
             ));
         }
         let content = node_content(data.get("content").unwrap_or(&Value::Null))?;
+        if content["tags"]
+            .as_array()
+            .map(|a| a.iter().any(|x| x == "alve-agent-report"))
+            .unwrap_or(false)
+            || content["facts"]
+                .as_array()
+                .map(|a| {
+                    a.iter().any(|f| {
+                        matches!(
+                            f["key"].as_str(),
+                            Some("agent_report_version" | "agent_run_id")
+                        )
+                    })
+                })
+                .unwrap_or(false)
+        {
+            return Err(Error::new(
+                403,
+                "Agent reports require the dedicated handoff flow.",
+            ));
+        }
         let node_id = data.get("nodeId").and_then(Value::as_str);
         if action == "update" {
             let id = node_id.unwrap_or("");
@@ -582,6 +645,12 @@ impl Vault {
             .optional()?;
         let proposal: Value =
             serde_json::from_str(&raw.ok_or_else(|| Error::new(404, "Proposal not found."))?)?;
+        if proposal.get("agentRunId").is_some() {
+            return Err(Error::new(
+                409,
+                "Review agent reports with the dedicated report action.",
+            ));
+        }
         if proposal.get("batchId").is_some() {
             return Err(Error::new(
                 409,
@@ -747,6 +816,12 @@ impl Vault {
             .iter()
             .map(|p| p.get("batchId").and_then(Value::as_str).map(str::to_owned))
             .collect();
+        if selected.iter().any(|p| p.get("agentRunId").is_some()) {
+            return Err(Error::new(
+                409,
+                "Review agent reports with the dedicated report action.",
+            ));
+        }
         if batch_ids.iter().any(Option::is_some)
             && (batch_ids.len() != 1 || batch_ids.contains(&None))
         {

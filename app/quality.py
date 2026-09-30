@@ -12,11 +12,13 @@ class QualityGate:
     def clear(self):
         self.tickets.clear()
 
-    def prepare(self, data, connection_id):
+    def prepare(self, data, connection_id, allow_agent_report=False):
         content = data.get("content")
         if not isinstance(content, dict) or "type" not in content or "kind" not in content:
             raise Problem("Categorize content explicitly: type (memory, project, person, event, document) and kind (decision, preference, insight, commitment, record).", 422)
         clean = node_content(content)
+        if not allow_agent_report and ('alve-agent-report' in clean['tags'] or any(f['key'] in {'agent_report_version','agent_run_id'} for f in clean['facts'])):
+            raise Problem('Use prepare_agent_report for an execution handoff.',422)
         if len(clean["title"]) > 120 or len(clean["body"]) > 2000 or len(clean["body"].split()) > 300:
             raise Problem("Condense this into one memory: title at most 120 characters; body at most 300 words and 2,000 characters. Split unrelated topics and use references for longer material.", 422)
         action = data.get("action", "create")
@@ -51,7 +53,7 @@ class QualityGate:
                     "If any check fails, revise and prepare again. Submission creates only an owner-reviewed proposal.",
                 ]}
 
-    def confirmed(self, data, connection_id):
+    def confirmed(self, data, connection_id, purpose=None):
         if set(data) != {"reviewToken", "confirmation"}:
             raise Problem("Prepare first, then submit only reviewToken and confirmation. Changed content requires another preparation.", 422)
         token = text(data.get("reviewToken"), "review token", 100, True)
@@ -60,6 +62,8 @@ class QualityGate:
             raise Problem("Review is unavailable or expired. Prepare again.", 409)
         if "batch" in ticket["payload"]:
             raise Problem("Use submit-batch for a prepared batch.", 422)
+        if ('_agentRunId' in ticket['payload']) != (purpose == 'agent_report'):
+            raise Problem('Use the matching report or memory submission tool for this preview.',422)
         c = data.get("confirmation")
         if not isinstance(c, dict) or any(c.get(k) is not True for k in ("concise", "accurateToSource", "structured", "userConfirmed")):
             raise Problem("Obtain explicit user confirmation of this exact preview, then confirm userConfirmed, concise, accurateToSource, and structured as true. Otherwise revise and prepare again.", 422)

@@ -54,6 +54,8 @@ Open **http://127.0.0.1:4765** and create a vault with a passphrase of at least 
 - Grant an AI connection an explicit selection of nodes and permissions.
 - Review exact AI proposal groups once before their memories and group become confirmed memory.
 - Browse clickable tags and group existing memories from the menu.
+- Introduce project agents, confirm their understanding, and hand off a first assignment with selected context. See [agent onboarding](docs/agents.md). AI execution remains in your chosen external client.
+- Let an explicitly authorized AI list assignments, retrieve a scoped briefing and return an exact reviewed handoff for the next run. Local leases track interrupted work; Alve does not start models or schedule AI runs.
 - Download an encrypted bundle for backup or transfer to another installation.
 - Restore on a fresh installation, or merge a same-vault bundle into an existing unlocked installation.
 

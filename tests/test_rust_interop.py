@@ -66,6 +66,33 @@ class RustInterop(unittest.TestCase):
         self.token = self.call(self.p, 'POST', '/api/unlock', {'password': PASSWORD})['token']
         self.assertEqual(self.owner('GET', '/api/graph')['nodes'][0]['title'], 'Python edit')
 
+    def test_agent_introduction_revision_and_recovery(self):
+        draft = {'name': 'Project manager', 'mission': 'Follow Project A.', 'method': 'Check next steps.',
+                 'escalation': 'Ask when blocked.', 'firstAssignment': 'Review current commitments.',
+                 'phase': 'introduced', 'understanding': '', 'contextIds': [], 'reviewDate': '2026-10-05'}
+        script = "const m=require('./app/static/agents.js');let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write(JSON.stringify(m.content(JSON.parse(s)))));"
+        def content():
+            return json.loads(subprocess.run(['node','-e',script],input=json.dumps(draft),capture_output=True,text=True,check=True).stdout)
+        project = self.owner('POST','/api/nodes',{'title':'Project A','type':'project'})
+        grant = self.owner('POST','/api/connections',{'name':'Scoped AI','nodeIds':[project['id']], 'permissions':['read']})
+        draft['contextIds'] = [project['id']]
+        node = self.owner('POST','/api/nodes',content())
+        draft.update(phase='ready',understanding='I follow Project A and ask before changes.')
+        ready = self.owner('PATCH','/api/nodes/'+node['id'],{**content(),'expectedRevision':node['revisionId']})
+        self.owner('PATCH','/api/nodes/'+node['id'],{**content(),'expectedRevision':node['revisionId']},expected=409)
+        self.call(self.p,'GET','/api/ai/nodes/'+node['id'],token=grant['token'],expected=404)
+        bundle = self.owner('POST','/api/bundle')['bundle']
+        self.owner('POST','/api/lock')
+        self.token = self.call(self.p,'POST','/api/unlock',{'password':PASSWORD})['token']
+        self.assertEqual(next(n for n in self.owner('GET','/api/graph')['nodes'] if n['id']==node['id'])['facts'], ready['facts'])
+        recovered = Vault(self.directory/'recovered-agent/memory.alve')
+        try:
+            recovered.restore(bundle,PASSWORD)
+            self.assertEqual(recovered.heads()[node['id']][0]['facts'],ready['facts'])
+            self.assertEqual(recovered.graph()['connections'],[])
+        finally:
+            recovered.lock()
+
     def test_prepared_batch_group_and_backup_restore_across_runtimes(self):
         proposals = [{'content': {'title': f'Responsibility {i}', 'body': 'Synthetic batch recovery.',
                                   'type': 'memory', 'kind': 'record', 'tags': ['responsibility']}} for i in range(5)]
@@ -90,6 +117,52 @@ class RustInterop(unittest.TestCase):
             self.assertEqual(len(v.graph()['nodes']), 6)
         finally:
             v.lock()
+
+    def test_agent_run_exact_report_approval_and_portable_resume(self):
+        project=self.owner('POST','/api/nodes',{'title':'Project A','type':'project'})
+        draft={'name':'Manager','mission':'Follow Project A.','method':'Review next steps.','escalation':'Ask when blocked.','firstAssignment':'Suggest next steps.','understanding':'I propose next steps and ask before changes.','phase':'ready','contextIds':[project['id']],'reviewDate':''}
+        script="const m=require('./app/static/agents.js');let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write(JSON.stringify(m.content(JSON.parse(s)))));"
+        content=json.loads(subprocess.run(['node','-e',script],input=json.dumps(draft),capture_output=True,text=True,check=True).stdout)
+        agent=self.owner('POST','/api/nodes',content)
+        grant=self.owner('POST','/api/connections',{'name':'Run AI','nodeIds':[agent['id'],project['id']],'permissions':['read','run','propose']})
+        def ai(method,path,body=None,expected=200):return self.call(self.p,method,path,body,grant['token'],expected)
+        listing=ai('GET','/api/ai/agent-assignments');self.assertEqual(listing['assignments'][0]['status'],'due')
+        body={'agentId':agent['id'],'requestId':'first-request'}
+        run=ai('POST','/api/ai/agent-briefing',body)
+        self.assertEqual(run,ai('POST','/api/ai/agent-briefing',body))
+        self.assertEqual(run['assignment']['mission'],draft['mission'])
+        report={'runId':run['run']['runId'],'report':{'workPerformed':'Reviewed Project A.','result':'Need a deadline.','uncertainties':'Deadline unknown.','remaining':'Ask user.','nextAction':'Ask for the deadline.','outcome':'partial','nextFollowUp':'2030-10-05T10:00:00+00:00','references':[]}}
+        preview=ai('POST','/api/ai/agent-reports/prepare',report)
+        confirmation={'reviewToken':preview['reviewToken'],'confirmation':CONFIRM}
+        ai('POST','/api/ai/proposals',confirmation,expected=409)
+        submitted=ai('POST','/api/ai/agent-reports/submit',confirmation)
+        self.owner('POST','/api/proposals/'+submitted['proposal']['id']+'/approve',expected=409)
+        approved=self.owner('POST','/api/agent-runs/'+run['run']['runId']+'/approve-report')
+        self.assertEqual(approved['node']['body'],preview['content']['body'])
+        self.assertEqual(approved['node']['facts'],preview['content']['facts'])
+        resumed=ai('POST','/api/ai/agent-briefing',{'agentId':agent['id'],'requestId':'second-request'})
+        self.assertEqual(resumed['lastReport']['id'],approved['node']['id'])
+        # A Rust-started ledger can also be resumed through the reference implementation.
+        self.owner('POST','/api/lock')
+        v=Vault(self.directory/'rust/memory.alve')
+        try:
+            v.unlock(PASSWORD)
+            from app.agents import AgentRuns
+            service=AgentRuns(v)
+            connection=v.auth(grant['token'])
+            retry=v.mutate(lambda:service.briefing({'agentId':agent['id'],'requestId':'second-request'},connection))
+            self.assertEqual(retry,{k:value for k,value in resumed.items() if k not in {'vaultId','vaultAlias'}})
+            bundle=v.bundle()['bundle']
+        finally:v.lock()
+        restored=Vault(self.directory/'agent-recovered/memory.alve')
+        try:
+            restored.restore(bundle,PASSWORD)
+            from app.agents import AgentRuns
+            service=AgentRuns(restored)
+            run=restored.mutate(lambda:service.briefing({'agentId':agent['id'],'requestId':'recovered'},None))
+            self.assertEqual(run['lastReport']['id'],approved['node']['id'])
+            self.assertEqual(len(service.load()),1)
+        finally:restored.lock()
 
     def test_bundle_exchange_retains_conflicts_and_excludes_credentials(self):
         n = self.owner('POST', '/api/nodes', {'title': 'Original'})

@@ -1,3 +1,4 @@
+pub mod agents;
 pub mod api;
 pub mod crypto;
 pub mod quality;

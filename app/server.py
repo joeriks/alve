@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 from .vault import MAX_ENVELOPE, Problem, Vault, canonical
 from .quality import QualityGate
 from .search import search
+from .agents import AgentRuns, INSTRUCTIONS
 
 STATIC = Path(__file__).parent / "static"
 CONTRACT = {
@@ -55,6 +56,20 @@ CONTRACT = {
 }
 
 
+CONTRACT['rules'].extend([
+    'When asked what Alve needs done, call list_agent_assignments, choose an eligible assignment and get_agent_briefing. Agent tools require explicit run permission, read, and the complete selected agent/context scope; starting or reporting also requires propose.',
+    'Run permission additionally allows scoped approved handoffs through agent tools. It never grants ordinary search/read access to additional nodes. Leases are device-local, not locks across synchronized devices.',
+    *INSTRUCTIONS,
+])
+CONTRACT['tools'].extend([
+    {'method':'GET','path':'/api/ai/agent-assignments','permission':'run','requiredPermissions':['read','run']},
+    {'method':'POST','path':'/api/ai/agent-briefing','permission':'run','requiredPermissions':['read','run','propose']},
+    {'method':'GET','path':'/api/ai/agent-runs/{runId}','permission':'run','requiredPermissions':['read','run']},
+    {'method':'POST','path':'/api/ai/agent-reports/prepare','permission':'run','requiredPermissions':['read','run','propose']},
+    {'method':'POST','path':'/api/ai/agent-reports/submit','permission':'run','requiredPermissions':['read','run','propose']},
+])
+
+
 class AlveServer(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -63,6 +78,7 @@ class AlveServer(ThreadingHTTPServer):
             raise ValueError("The POC binds only to IPv4 loopback.")
         self.vault = vault
         self.quality = QualityGate()
+        self.agents = AgentRuns(vault)
         self.failed_unlocks = 0
         self.unlock_after = 0.0
         self.last_owner_activity = time.monotonic()
@@ -152,7 +168,7 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(urlsplit(self.path).query)
             if method == "GET" and path == "/favicon.ico":
                 return self.respond(204, b"", "image/x-icon")
-            if method == "GET" and path in {"/", "/app.js", "/style.css"}:
+            if method == "GET" and path in {"/", "/app.js", "/agents.js", "/updates.js", "/style.css"}:
                 file = STATIC / ({"/": "index.html"}.get(path, path[1:]))
                 content_type = {".html": "text/html", ".js": "text/javascript", ".css": "text/css"}[file.suffix]
                 return self.respond(200, file.read_bytes(), content_type + "; charset=utf-8")
@@ -198,6 +214,15 @@ class Handler(BaseHTTPRequestHandler):
     def owner(self, method, path, data):
         vault = self.server.vault
         parts = path.strip("/").split("/")
+        if method == 'GET' and path == '/api/agent-runs':
+            return self.server.agents.owner_list()
+        if method == 'POST' and path == '/api/agent-runs/prune':
+            return vault.mutate(self.server.agents.prune)
+        if method == 'POST' and len(parts)==4 and parts[:2]==['api','agent-runs']:
+            if parts[3] in {'approve-report','reject-report'}:
+                return vault.mutate(lambda:self.server.agents.review(parts[2],parts[3]=='approve-report'))
+            if parts[3]=='abandon':
+                return vault.mutate(lambda:self.server.agents.abandon(parts[2]))
         if method == "GET" and path == "/api/graph":
             return vault.graph()
         if method == "GET" and path == "/api/export":
@@ -250,6 +275,27 @@ class Handler(BaseHTTPRequestHandler):
             graph = vault.visible(grant)
             return respond(search(graph, query), grant)
         parts = path.strip("/").split("/")
+        if path.startswith('/api/ai/agent-'):
+            grant=vault.auth(token,permission='run')
+            if method=='GET' and path=='/api/ai/agent-assignments':
+                if set(query)-{'limit','offset'} or any(len(v)!=1 for v in query.values()):
+                    raise Problem('Use limit and offset only, once each.',422)
+                try:
+                    limit=int(query.get('limit',['20'])[0]);offset=int(query.get('offset',['0'])[0])
+                except (ValueError,TypeError):
+                    raise Problem('Use integer limit and offset.',422) from None
+                return respond(self.server.agents.assignments(grant,limit,offset),grant)
+            if method=='POST' and path=='/api/ai/agent-briefing':
+                return respond(vault.mutate(lambda:self.server.agents.briefing(data,grant)),grant)
+            if method=='GET' and len(parts)==4 and parts[:3]==['api','ai','agent-runs']:
+                return respond(self.server.agents.status(parts[3],grant),grant)
+            if method=='POST' and path=='/api/ai/agent-reports/prepare':
+                return respond(self.server.agents.prepare(data,grant,self.server.quality),grant)
+            if method=='POST' and path=='/api/ai/agent-reports/submit':
+                result=vault.mutate(lambda:self.server.agents.submit(data,grant,self.server.quality))
+                self.server.quality.consume(data['reviewToken'])
+                return respond(result,grant)
+            raise Problem('Agent endpoint not found.',404)
         if method == "GET" and len(parts) in {4, 5} and parts[:3] == ["api", "ai", "nodes"]:
             node_id = parts[3]
             grant = vault.auth(token, permission="read", node_id=node_id)

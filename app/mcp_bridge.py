@@ -148,6 +148,26 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"reviewToken": {"type": "string", "minLength": 1}, "confirmation": FINAL_CONFIRMATION}, "required": ["reviewToken", "confirmation"], "additionalProperties": False}},
 ]
 
+AGENT_REPORT = {'type':'object','properties':{
+    **{k:{'type':'string','maxLength':300,**({'minLength':1} if k in {'workPerformed','result','nextAction'} else {})} for k in ['workPerformed','result','uncertainties','remaining','nextAction']},
+    'outcome':{'type':'string','enum':['completed','partial','blocked']},
+    'nextFollowUp':{'type':'string','format':'date-time','maxLength':80,'description':'Explicit UTC offset required. This makes the assignment eligible again; it does not schedule an AI.'},
+    'references':CONTENT['properties']['references']},
+    'required':['workPerformed','result','nextAction','outcome','nextFollowUp'],'additionalProperties':False}
+AGENT_TOOLS = [
+    {'name':'list_agent_assignments','description':'Start here when asked what Alve needs done. List authorized agent assignments and follow-up reasons. Requires explicit read and run permissions. Choose a due assignment, then get_agent_briefing. No model or scheduler is started.',
+     'inputSchema':{'type':'object','properties':{'limit':{'type':'integer','minimum':1,'maximum':100,'default':20},'offset':{'type':'integer','minimum':0,'maximum':5000,'default':0}},'additionalProperties':False}},
+    {'name':'get_agent_briefing','description':'Start a device-local one-hour run and obtain the current assignment, authorized context and latest approved handoff. Requires read, run and propose. Use a fresh requestId; reuse it only to retry the same request. Before ending, prepare and submit a report after explicit user confirmation. Fetching this briefing never means work is complete.',
+     'inputSchema':{'type':'object','properties':{k:{'type':'string','minLength':1,'maxLength':100} for k in ['agentId','requestId']},'required':['agentId','requestId'],'additionalProperties':False}},
+    {'name':'get_agent_run','description':'Recover your run status after an interrupted connection or uncertain submission. Pending reports require owner review; expired or abandoned work is never completed.',
+     'inputSchema':{'type':'object','properties':{'runId':{'type':'string','minLength':1,'maxLength':100}},'required':['runId'],'additionalProperties':False}},
+    {'name':'prepare_agent_report','description':'Before ending an agent run, prepare a concise report of work performed, evidence, uncertainties, remaining work, next action and next follow-up. Partial or blocked progress must also be reported. Show the exact returned memory preview and ask for human confirmation; never auto-confirm.',
+     'inputSchema':{'type':'object','properties':{'runId':{'type':'string','minLength':1,'maxLength':100},'report':AGENT_REPORT},'required':['runId','report'],'additionalProperties':False}},
+    {'name':'submit_agent_report','description':'Submit the exact prepared report only after explicit user confirmation using its unchanged token. This records a pending report, not a verified project fact or proof of payment. Alve owner approval is required before it becomes the next handoff.',
+     'inputSchema':{'type':'object','properties':{'reviewToken':{'type':'string','minLength':1},'confirmation':FINAL_CONFIRMATION},'required':['reviewToken','confirmation'],'additionalProperties':False}},
+]
+TOOLS += AGENT_TOOLS
+
 
 def search_query(args):
     """Translate the MCP search object into the API's repeated query parameters."""
@@ -201,7 +221,7 @@ def handle(message):
         if method == "initialize":
             result = {"protocolVersion": PROTOCOL, "capabilities": {"tools": {}, "resources": {}},
                       "serverInfo": {"name": "alve-local-memory-poc", "version": "0.1.0"},
-                      "instructions": "Read alve://usage before using memory. Prepare a candidate, show its full preview to the user, obtain explicit confirmation, then propose it. All writes remain owner-reviewed proposals."}
+                      "instructions": "Read alve://usage first. To check what Alve needs done, call list_agent_assignments then get_agent_briefing. Before ending a run, prepare_agent_report, obtain explicit human confirmation, and submit_agent_report. Never auto-confirm. All reports and memory changes require owner approval."}
         elif method == "ping":
             result = {}
         elif method == "tools/list":
@@ -232,6 +252,20 @@ def handle(message):
                     data = api("/api/ai/proposals", args)
                 elif name == "propose_memory_batch":
                     data = api("/api/ai/proposals/submit-batch", args)
+                elif name == 'list_agent_assignments':
+                    if set(args)-{'limit','offset'} or any(type(v) is not int for v in args.values()):
+                        raise ValueError('Use integer limit and offset only.')
+                    data=api('/api/ai/agent-assignments?'+urlencode(args))
+                elif name == 'get_agent_briefing':
+                    data=api('/api/ai/agent-briefing',args)
+                elif name == 'get_agent_run':
+                    if set(args)!={'runId'} or not isinstance(args['runId'],str) or not args['runId']:
+                        raise ValueError('Supply runId only.')
+                    data=api('/api/ai/agent-runs/'+quote(args['runId'],safe=''))
+                elif name == 'prepare_agent_report':
+                    data=api('/api/ai/agent-reports/prepare',args)
+                elif name == 'submit_agent_report':
+                    data=api('/api/ai/agent-reports/submit',args)
                 else:
                     raise ValueError("Unknown tool")
                 result = {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False)}], "isError": False}

@@ -49,6 +49,7 @@ jobs:
       - run: cargo test -p alve --locked
       - run: cargo build -p alve-core --bin alve-mcp --release --locked
       - run: npm run check
+      - run: npm run test:agents
       - run: npm run build -- --bundles nsis --config src-tauri/tauri.release.conf.json
       - uses: actions/upload-artifact@v4
         with:

@@ -100,6 +100,41 @@ fn call(name: &str, args: &Value) -> std::result::Result<Value, String> {
         "prepare_memory_batch" => api("/api/ai/proposals/prepare-batch", Some(args)),
         "propose_memory" => api("/api/ai/proposals", Some(args)),
         "propose_memory_batch" => api("/api/ai/proposals/submit-batch", Some(args)),
+        "list_agent_assignments" => {
+            let object = args.as_object().ok_or("Arguments must be an object.")?;
+            if object
+                .keys()
+                .any(|k| !["limit", "offset"].contains(&k.as_str()))
+            {
+                return Err("Use limit and offset only.".into());
+            }
+            let mut query = url::form_urlencoded::Serializer::new(String::new());
+            for (key, value) in object {
+                let number = value
+                    .as_u64()
+                    .ok_or("Use nonnegative integer limit and offset.")?;
+                query.append_pair(key, &number.to_string());
+            }
+            api(
+                &format!("/api/ai/agent-assignments?{}", query.finish()),
+                None,
+            )
+        }
+        "get_agent_briefing" => api("/api/ai/agent-briefing", Some(args)),
+        "get_agent_run" => {
+            let object = args.as_object().ok_or("Arguments must be an object.")?;
+            if object.len() != 1 {
+                return Err("Supply runId only.".into());
+            }
+            let id = args["runId"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .ok_or("Supply runId.")?;
+            let encoded: String = url::form_urlencoded::byte_serialize(id.as_bytes()).collect();
+            api(&format!("/api/ai/agent-runs/{encoded}"), None)
+        }
+        "prepare_agent_report" => api("/api/ai/agent-reports/prepare", Some(args)),
+        "submit_agent_report" => api("/api/ai/agent-reports/submit", Some(args)),
         _ => Err("Unknown tool.".into()),
     }
 }
@@ -202,7 +237,7 @@ fn handle(m: Value) -> Option<Value> {
         );
     }
     let result=match m["method"].as_str().unwrap_or("") {
-        "initialize"=>Ok(json!({"protocolVersion":"2025-11-25","capabilities":{"tools":{},"resources":{}},"serverInfo":{"name":"alve-local-memory","version":"0.2.0"},"instructions":"Read alve://usage. Prepare memory, show the exact preview to the user, request explicit confirmation, then propose. Owner approval in Alve is required."})),
+        "initialize"=>Ok(json!({"protocolVersion":"2025-11-25","capabilities":{"tools":{},"resources":{}},"serverInfo":{"name":"alve-local-memory","version":"0.2.0"},"instructions":"Read alve://usage first. To check what Alve needs done, call list_agent_assignments then get_agent_briefing. Before ending a run, prepare_agent_report, obtain explicit human confirmation, and submit_agent_report. Never auto-confirm. All reports and memory changes require owner approval."})),
         "ping"=>Ok(json!({})),
         "tools/list"=>Ok(json!({"tools":serde_json::from_str::<Value>(include_str!("../mcp-tools.json")).unwrap()})),
         "resources/list"=>Ok(json!({"resources":[{"uri":"alve://usage","name":"Alve usage contract","mimeType":"application/json"}]})),

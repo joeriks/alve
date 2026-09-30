@@ -381,8 +381,8 @@ class Vault:
         ids, permissions = data.get("nodeIds"), data.get("permissions")
         if not isinstance(ids, list) or not ids or len(ids) > 500 or any(not isinstance(i, str) or i not in self.heads() for i in ids):
             raise Problem("Select existing nodes for this connection.")
-        if not isinstance(permissions, list) or not permissions or any(not isinstance(p, str) or p not in {"search", "read", "propose"} for p in permissions):
-            raise Problem("Only search, read, and propose permissions are supported.")
+        if not isinstance(permissions, list) or not permissions or any(not isinstance(p, str) or p not in {"search", "read", "propose", "run"} for p in permissions):
+            raise Problem("Only search, read, propose and run permissions are supported.")
         token = secrets.token_urlsafe(32)
         conn = {"id": uuid4().hex, "name": name, "vaultAlias": alias, "nodeIds": sorted(set(ids)),
                 "permissions": sorted(set(permissions)), "revoked": False, "createdAt": now(),
@@ -404,6 +404,8 @@ class Vault:
             raise Problem("Only memory create/update proposals are supported.")
         action = data.get("action", "create")
         content = node_content(data.get("content", {}))
+        if ('alve-agent-report' in content['tags'] or any(f['key'] in {'agent_report_version','agent_run_id'} for f in content['facts'])) and not data.get('_agentRunId'):
+            raise Problem('Use the dedicated agent report workflow.',422)
         node_id = data.get("nodeId")
         if action == "update":
             if grant is not None and node_id not in grant["nodeIds"]:
@@ -435,6 +437,8 @@ class Vault:
 
     def review(self, identifier, approve):
         row = self.db.execute("SELECT payload FROM proposals WHERE id=?", (identifier,)).fetchone()
+        if row and json.loads(row[0]).get('agentRunId'):
+            raise Problem('Review this report through its agent run.',409)
         if row and json.loads(row[0]).get("batchId"):
             raise Problem("Review the complete prepared batch together.", 409)
         return self._review(identifier, approve)
@@ -462,6 +466,8 @@ class Vault:
         return {"proposal": proposal, "node": result}
 
     def review_batch(self, data):
+        if isinstance(data,dict) and isinstance(data.get('proposalIds'),list) and any(p.get('agentRunId') for p in self.rows('proposals') if p['id'] in data['proposalIds']):
+            raise Problem('Review agent reports through their agent runs.',409)
         if not isinstance(data, dict) or set(data) - {"proposalIds", "action", "groupTitle"}:
             raise Problem("Invalid batch review request.")
         identifiers, action = data.get("proposalIds"), data.get("action")

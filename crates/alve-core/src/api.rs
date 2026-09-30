@@ -1,4 +1,5 @@
 use crate::{
+    agents,
     quality::QualityGate,
     search::{self, Query},
     vault::Vault,
@@ -12,7 +13,7 @@ use std::{
 
 pub struct Engine {
     pub vault: Vault,
-    quality: QualityGate,
+    pub(crate) quality: QualityGate,
     last_owner: Instant,
     failed_unlocks: u32,
     unlock_after: Instant,
@@ -91,6 +92,7 @@ impl Engine {
         let parts: Vec<_> = path.trim_matches('/').split('/').collect();
         match (method, path) {
             ("GET", "/api/graph") => self.vault.graph(),
+            ("GET", "/api/agent-runs") => agents::owner_list(&self.vault),
             ("GET", "/api/export") => self.vault.export(),
             ("POST", "/api/lock") => {
                 self.vault.lock();
@@ -107,6 +109,7 @@ impl Engine {
             ("POST", "/api/nodes") => self.vault.mutate(|v| v.add_node(data, None, None, "user")),
             ("POST", "/api/relations") => self.vault.mutate(|v| v.add_relation(data)),
             ("POST", "/api/nodes/group") => self.vault.mutate(|v| v.group_nodes(data)),
+            ("POST", "/api/agent-runs/prune") => self.vault.mutate(agents::prune),
             ("POST", "/api/connections") => self.vault.mutate(|v| v.grant(data)),
             ("POST", "/api/proposals/review-batch") => self.vault.mutate(|v| v.review_batch(data)),
             _ => {
@@ -130,6 +133,17 @@ impl Engine {
                 }
                 if method == "DELETE" && parts.len() == 3 && parts[..2] == ["api", "connections"] {
                     return self.vault.mutate(|v| v.revoke(parts[2]));
+                }
+                if method == "POST"
+                    && parts.len() == 4
+                    && parts[..2] == ["api", "agent-runs"]
+                    && ["approve-report", "reject-report", "abandon"].contains(&parts[3])
+                {
+                    return self.vault.mutate(|v| match parts[3] {
+                        "approve-report" => agents::review(v, parts[2], true),
+                        "reject-report" => agents::review(v, parts[2], false),
+                        _ => agents::abandon(v, parts[2]),
+                    });
                 }
                 if method == "POST"
                     && parts.len() == 4
@@ -176,8 +190,13 @@ impl Engine {
             Some("search")
         } else if path.starts_with("/api/ai/nodes/") {
             Some("read")
-        } else if path.starts_with("/api/ai/proposals") {
+        } else if path.starts_with("/api/ai/proposals") || path.contains("agent-reports") {
             Some("propose")
+        } else if path.contains("agent-assignments")
+            || path.contains("agent-briefing")
+            || path.contains("agent-runs/")
+        {
+            Some("read")
         } else {
             None
         };
@@ -209,6 +228,70 @@ impl Engine {
             } else {
                 json!({"node":n,"conflicts":graph["conflicts"].as_array().unwrap().iter().filter(|c|c["nodeId"]==id).collect::<Vec<_>>()})
             }
+        } else if method == "GET" && path == "/api/ai/agent-assignments" {
+            self.vault.auth(token, false, Some("run"), None)?;
+            let mut limit = 20usize;
+            let mut offset = 0usize;
+            let mut seen = std::collections::HashSet::new();
+            for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
+                if !["limit", "offset"].contains(&k.as_ref()) || !seen.insert(k.to_string()) {
+                    return Err(Error::new(422, "Use limit and offset only, once each."));
+                }
+                let number = v
+                    .parse::<usize>()
+                    .map_err(|_| Error::new(422, "Use nonnegative integer limit and offset."))?;
+                if k == "limit" {
+                    if !(1..=100).contains(&number) {
+                        return Err(Error::new(422, "Use limit 1 to 100."));
+                    }
+                    limit = number
+                }
+                if k == "offset" {
+                    if number > 5000 {
+                        return Err(Error::new(422, "Use offset 0 to 5000."));
+                    }
+                    offset = number
+                }
+            }
+            agents::list(&self.vault, grant.as_ref(), limit, offset)?
+        } else if method == "POST" && path == "/api/ai/agent-briefing" {
+            self.vault.auth(token, false, Some("run"), None)?;
+            self.vault.auth(token, false, Some("propose"), None)?;
+            let result = self
+                .vault
+                .mutate(|v| agents::briefing(v, grant.as_ref(), token, data))?;
+            result
+        } else if method == "GET" && path.starts_with("/api/ai/agent-runs/") {
+            self.vault.auth(token, false, Some("run"), None)?;
+            agents::run(
+                &self.vault,
+                grant.as_ref(),
+                token,
+                path.trim_start_matches("/api/ai/agent-runs/"),
+            )?
+        } else if method == "POST" && path == "/api/ai/agent-reports/prepare" {
+            self.vault.auth(token, false, Some("read"), None)?;
+            self.vault.auth(token, false, Some("run"), None)?;
+            let prepared = agents::prepare(&self.vault, grant.as_ref(), token, data)?;
+            let actor = grant
+                .as_ref()
+                .and_then(|g| g["id"].as_str())
+                .unwrap_or("owner");
+            self.quality.prepare_report(prepared, actor)?
+        } else if method == "POST" && path == "/api/ai/agent-reports/submit" {
+            self.vault.auth(token, false, Some("read"), None)?;
+            self.vault.auth(token, false, Some("run"), None)?;
+            let actor = grant
+                .as_ref()
+                .and_then(|g| g["id"].as_str())
+                .unwrap_or("owner");
+            let (payload, confirmation) = self.quality.confirmed_report(data, actor)?;
+            let result = self
+                .vault
+                .mutate(|v| agents::submit(v, grant.as_ref(), token, &payload, &confirmation))?;
+            self.quality
+                .consume(data["reviewToken"].as_str().unwrap_or(""));
+            json!({"runId":result["agentRunId"],"status":"pending_report","proposal":result,"instructions":["Owner review is required before this report becomes a memory."]})
         } else if method == "POST" && path == "/api/ai/proposals/prepare" {
             if data["action"] == "update" {
                 let id = data["nodeId"]

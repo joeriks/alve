@@ -11,6 +11,7 @@ struct Ticket {
     payload: Value,
     actor: String,
     expires: Instant,
+    purpose: &'static str,
 }
 #[derive(Default)]
 pub struct QualityGate {
@@ -22,7 +23,7 @@ impl QualityGate {
     }
     pub fn prepare(&mut self, data: &Value, actor: &str) -> Result<Value> {
         let payload = self.prepare_payload(data)?;
-        let token = self.insert(payload.clone(), actor)?;
+        let token = self.insert(payload.clone(), actor, "proposal")?;
         Ok(
             json!({"status":"confirmation_required","reviewToken":token,"content":payload["content"],
             "action":payload["action"],"nodeId":payload.get("nodeId"),"expectedRevision":payload.get("expectedRevision"),"expiresInSeconds":600,
@@ -99,7 +100,7 @@ impl QualityGate {
         }
         Ok(payload)
     }
-    fn insert(&mut self, payload: Value, actor: &str) -> Result<String> {
+    fn insert(&mut self, payload: Value, actor: &str, purpose: &'static str) -> Result<String> {
         self.tickets.retain(|_, t| t.expires > Instant::now());
         if self.tickets.len() >= 128 {
             return Err(Error::new(429, "Too many active reviews. Wait for expiry."));
@@ -113,6 +114,7 @@ impl QualityGate {
                 payload,
                 actor: actor.to_owned(),
                 expires: Instant::now() + Duration::from_secs(600),
+                purpose,
             },
         );
         Ok(token)
@@ -148,7 +150,7 @@ impl QualityGate {
         OsRng.fill_bytes(&mut random);
         let batch_id = URL_SAFE_NO_PAD.encode(random);
         let batch = json!({"batchId":batch_id,"title":title,"proposals":payloads,"group":{"title":title,"type":"project","kind":"record","body":"Groups the selected memories.","tags":[],"facts":[],"references":[],"status":"active","relationType":"belongs_to","relationDirection":"member_to_group"}});
-        let token = self.insert(json!({"batch":batch.clone()}), actor)?;
+        let token = self.insert(json!({"batch":batch.clone()}), actor, "batch")?;
         Ok(
             json!({"status":"confirmation_required","reviewToken":token,"batch":batch,"checks":{"lengthWithinLimit":true,"explicitCategory":true,"typedFactsValid":true,"factualTruthVerified":false},"instructions":["Show the exact complete batch preview, including tags and the planned owner-created project group and belongs_to links, then request explicit confirmation."],"expiresInSeconds":600}),
         )
@@ -166,7 +168,7 @@ impl QualityGate {
         let ticket = self
             .tickets
             .get(token)
-            .filter(|t| t.actor == actor && t.expires > Instant::now())
+            .filter(|t| t.actor == actor && t.expires > Instant::now() && t.purpose == "proposal")
             .ok_or_else(|| Error::new(409, "Review unavailable or expired. Prepare again."))?;
         if ticket.payload.get("batch").is_some() {
             return Err(Error::new(422, "Use submit-batch for a prepared batch."));
@@ -188,7 +190,7 @@ impl QualityGate {
         let ticket = self
             .tickets
             .get(token)
-            .filter(|t| t.actor == actor && t.expires > Instant::now())
+            .filter(|t| t.actor == actor && t.expires > Instant::now() && t.purpose == "batch")
             .ok_or_else(|| Error::new(409, "Review unavailable or expired. Prepare again."))?;
         let batch = ticket
             .payload
@@ -248,6 +250,48 @@ impl QualityGate {
     }
     pub fn consume(&mut self, token: &str) {
         self.tickets.remove(token);
+    }
+    /// A report ticket deliberately uses a separate purpose, so it can never be
+    /// exchanged for an ordinary memory proposal (or vice versa).
+    pub fn prepare_report(&mut self, payload: Value, actor: &str) -> Result<Value> {
+        let content = node_content(&payload["content"])?;
+        let body = content["body"].as_str().unwrap_or("");
+        if content["title"].as_str().unwrap_or("").chars().count() > 120
+            || body.chars().count() > 2000
+            || body.split_whitespace().count() > 300
+        {
+            return Err(Error::new(422,"Condense the report to 300 words and 2,000 characters before requesting confirmation."));
+        }
+        let token = self.insert(payload.clone(), actor, "agent_report")?;
+        Ok(
+            json!({"status":"confirmation_required","reviewToken":token,"content":content,"runId":payload["runId"],"expiresInSeconds":600,"instructions":["Show this exact report preview, including outcome, next action, follow-up date, references and frozen scope, to the user. Obtain explicit confirmation before submit_agent_report. Never auto-confirm. Owner approval is still required."],"nextTools":["submit_agent_report"]}),
+        )
+    }
+    pub fn confirmed_report(&self, data: &Value, actor: &str) -> Result<(Value, Value)> {
+        let object = data
+            .as_object()
+            .ok_or_else(|| Error::new(422, "Prepare an agent report first."))?;
+        if object.len() != 2
+            || !object.contains_key("reviewToken")
+            || !object.contains_key("confirmation")
+        {
+            return Err(Error::new(422, "Prepare an agent report first."));
+        }
+        let ticket = self
+            .tickets
+            .get(data["reviewToken"].as_str().unwrap_or(""))
+            .filter(|t| {
+                t.actor == actor && t.expires > Instant::now() && t.purpose == "agent_report"
+            })
+            .ok_or_else(|| {
+                Error::new(
+                    409,
+                    "Report confirmation unavailable or expired. Prepare again.",
+                )
+            })?;
+        let confirmation =
+            self.validate_confirmation(&data["confirmation"], &[ticket.payload.clone()])?;
+        Ok((ticket.payload.clone(), confirmation))
     }
 }
 

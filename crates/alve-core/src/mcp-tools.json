@@ -678,5 +678,224 @@
       ],
       "additionalProperties": false
     }
+  },
+  {
+    "name": "list_agent_assignments",
+    "description": "Start here when asked what Alve needs done. List authorized agent assignments and follow-up reasons. Requires explicit read and run permissions. Choose a due assignment, then get_agent_briefing. No model or scheduler is started.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "default": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_agent_briefing",
+    "description": "Start a device-local one-hour run and obtain the current assignment, authorized context and latest approved handoff. Requires read, run and propose. Use a fresh requestId; reuse it only to retry the same request. Before ending, prepare and submit a report after explicit user confirmation. Fetching this briefing never means work is complete.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": [
+        "agentId",
+        "requestId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_agent_run",
+    "description": "Recover your run status after an interrupted connection or uncertain submission. Pending reports require owner review; expired or abandoned work is never completed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": [
+        "runId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "prepare_agent_report",
+    "description": "Before ending an agent run, prepare a concise report of work performed, evidence, uncertainties, remaining work, next action and next follow-up. Partial or blocked progress must also be reported. Show the exact returned memory preview and ask for human confirmation; never auto-confirm.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "report": {
+          "type": "object",
+          "properties": {
+            "workPerformed": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            },
+            "result": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            },
+            "uncertainties": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "remaining": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "nextAction": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "completed",
+                "partial",
+                "blocked"
+              ]
+            },
+            "nextFollowUp": {
+              "type": "string",
+              "format": "date-time",
+              "maxLength": 80,
+              "description": "Explicit UTC offset required. This makes the assignment eligible again; it does not schedule an AI."
+            },
+            "references": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "pattern": "^https?://"
+                  }
+                },
+                "required": [
+                  "title"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "workPerformed",
+            "result",
+            "nextAction",
+            "outcome",
+            "nextFollowUp"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "runId",
+        "report"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "submit_agent_report",
+    "description": "Submit the exact prepared report only after explicit user confirmation using its unchanged token. This records a pending report, not a verified project fact or proof of payment. Alve owner approval is required before it becomes the next handoff.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "reviewToken": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confirmation": {
+          "type": "object",
+          "properties": {
+            "concise": {
+              "const": true
+            },
+            "accurateToSource": {
+              "const": true
+            },
+            "structured": {
+              "const": true
+            },
+            "userConfirmed": {
+              "const": true
+            },
+            "sourceBasis": {
+              "type": "string",
+              "enum": [
+                "user_statement",
+                "reference",
+                "inference",
+                "unknown"
+              ]
+            },
+            "basis": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "uncertainties": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "concise",
+            "accurateToSource",
+            "structured",
+            "userConfirmed",
+            "sourceBasis",
+            "basis",
+            "uncertainties"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "reviewToken",
+        "confirmation"
+      ],
+      "additionalProperties": false
+    }
   }
 ]
