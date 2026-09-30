@@ -1,0 +1,24 @@
+[package]
+name = "alve-core"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+aes-gcm = "0.10"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+fs2 = "0.4"
+rand = "0.8"
+rusqlite = { version = "0.37", features = ["bundled", "serialize"] }
+rust_decimal = "1"
+scrypt = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+subtle = "2"
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
+zeroize = "1"
+url = "2"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
