@@ -40,11 +40,13 @@
       <label class="search"><span>⌕</span><input id="search" type="search" placeholder="Search memories"></label>
       <nav id="nav" aria-label="Workspace">
         <button data-view="overview" class="nav-item active"><span>◌</span> Overview</button>
+        <button data-view="vaults" class="nav-item"><span>▣</span> Vaults</button>
         <button data-view="graph" class="nav-item"><span>⌘</span> Graph</button>
         <button data-view="proposals" class="nav-item"><span>✦</span> Proposals <b id="proposal-count"></b></button>
         <button data-view="connections" class="nav-item"><span>↗</span> Connections</button>
         <button data-view="backup" class="nav-item"><span>↓</span> Backup & export</button>
       </nav>
+      <div id="vault-summary" class="vault-summary" aria-live="polite"></div>
       <div class="sidebar-bottom">
         <button data-view="ai" class="nav-item"><span>⊹</span> AI contract</button>
         <button id="lock" class="nav-item quiet"><span>⏻</span> Lock vault</button>

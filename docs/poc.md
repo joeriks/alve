@@ -11,6 +11,7 @@
 - Atomic encrypted writes; failed persistence rolls back the in-memory mutation.
 - Loopback-only API with owner bearer sessions and separate per-connection AI tokens.
 - Explicit AI node scopes, search/read/propose permissions, revocation, and owner-reviewed proposals.
+- A visible current-vault overview with active AI connection labels, AI-visible vault aliases, permissions, and scoped node counts; revoked grants are separate history. This is one vault per instance, not a multi-vault manager.
 - Mandatory AI preparation: exact categorized preview, request for human confirmation, then an explicit attestation before owner review.
 - Local stdio MCP bridge exposing the usage contract and five memory tools.
 - Encrypted graph/history bundles, restore into a new installation, and idempotent same-vault merge.

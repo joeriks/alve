@@ -303,6 +303,30 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request("/api/ai/search?updatedSince=2026-01-01", token=c["token"])[0], 400)
         self.assertEqual(self.request("/api/ai/search?tags=misspelled", token=c["token"])[0], 400)
 
+    def test_ai_vault_alias_is_per_connection_and_persisted(self):
+        _, node = self.request("/api/nodes", {"title": "Allowed"}, self.admin)
+        connections = []
+        for alias in ("personal-memory", "research-memory"):
+            status, c = self.request("/api/connections", {"name": "Local assistant", "vaultAlias": alias,
+                "nodeIds": [node["id"]], "permissions": ["search", "read"]}, self.admin)
+            self.assertEqual(status, 200)
+            connections.append(c)
+            for endpoint in ("/api/ai/contract", "/api/ai/search", "/api/ai/nodes/" + node["id"], "/api/ai/nodes/" + node["id"] + "/relations"):
+                status, result = self.request(endpoint, token=c["token"])
+                self.assertEqual(status, 200)
+                self.assertEqual(result["vaultAlias"], alias)
+                self.assertEqual(result["vaultId"], self.v.vault_id)
+        self.request("/api/lock", {}, self.admin)
+        _, unlocked = self.request("/api/unlock", {"password": PASSWORD})
+        self.admin = unlocked["token"]
+        _, graph = self.request("/api/graph", token=self.admin)
+        self.assertEqual({c["vaultAlias"] for c in graph["connections"]}, {"personal-memory", "research-memory"})
+        for invalid in ("", " " * 3, "x" * 101, None):
+            self.assertEqual(self.request("/api/connections", {"name": "Bad", "vaultAlias": invalid,
+                "nodeIds": [node["id"]], "permissions": ["read"]}, self.admin)[0], 400)
+        self.request("/api/connections/" + connections[0]["connection"]["id"], token=self.admin, method="DELETE")
+        self.assertEqual(self.request("/api/ai/contract", token=connections[0]["token"])[0], 401)
+
     def test_origin_host_and_auth_boundaries(self):
         self.assertEqual(self.request("/api/graph")[0], 401)
         self.assertEqual(self.request("/api/graph", token=self.admin, headers={"Origin": "https://evil.example"})[0], 403)

@@ -9,6 +9,8 @@ Alve does not require a particular model provider. A compatible AI client can ca
 3. Open **Connections**, select exactly the nodes this client may access, and choose search/read/propose permissions.
 4. Copy the one-time connection token. The stored grant contains a token hash, not the token itself.
 
+The **Vaults** screen lists the current instance's vault and its active AI grants. A connection's `name` labels the AI client; `vaultAlias` is the name of the vault shown to that client. New grants default to `memory` unless the owner chooses another alias. Existing grants without an alias remain unnamed. Scoped API responses include `vaultId` and `vaultAlias` (null for an unnamed or owner session). These labels do not change node scope or permissions and do not verify the AI provider. The POC manages one vault per instance; other instances are not listed. Revoked connections are shown separately and do not count as active access.
+
 Connections are issued on each installation separately. Restore and peer bundles do not copy them. Revocation blocks future calls and blocks approval of that connection's pending proposals; it cannot retract data already read.
 
 ## MCP stdio adapter

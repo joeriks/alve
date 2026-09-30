@@ -230,13 +230,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def ai(self, method, path, query, data, token):
         vault = self.server.vault
+        def respond(value, grant):
+            return self.respond(200, {**value, "vaultId": vault.vault_id,
+                                     "vaultAlias": grant.get("vaultAlias") if grant else None})
         if path == "/api/ai/contract" and method == "GET":
-            vault.auth(token)
-            return self.respond(200, CONTRACT)
+            grant = vault.auth(token)
+            return respond(CONTRACT, grant)
         if path == "/api/ai/search" and method == "GET":
             grant = vault.auth(token, permission="search")
             graph = vault.visible(grant)
-            return self.respond(200, search(graph, query))
+            return respond(search(graph, query), grant)
         parts = path.strip("/").split("/")
         if method == "GET" and len(parts) in {4, 5} and parts[:3] == ["api", "ai", "nodes"]:
             node_id = parts[3]
@@ -248,8 +251,8 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 5:
                 if parts[4] != "relations":
                     raise Problem("Endpoint not found.", 404)
-                return self.respond(200, {"relations": [r for r in graph["relations"] if node_id in {r["fromId"], r["toId"]}]})
-            return self.respond(200, {"node": node, "conflicts": [c for c in graph["conflicts"] if c["nodeId"] == node_id]})
+                return respond({"relations": [r for r in graph["relations"] if node_id in {r["fromId"], r["toId"]}]}, grant)
+            return respond({"node": node, "conflicts": [c for c in graph["conflicts"] if c["nodeId"] == node_id]}, grant)
         if method == "POST" and path == "/api/ai/proposals/prepare":
             grant = vault.auth(token, permission="propose")
             if data.get("action") == "update":
@@ -259,7 +262,7 @@ class Handler(BaseHTTPRequestHandler):
                 current = vault.heads().get(node_id, [])
                 if len(current) != 1 or current[0]["revisionId"] != data.get("expectedRevision"):
                     raise Problem("Read the current, non-conflicting revision before preparing an update.", 409)
-            return self.respond(200, self.server.quality.prepare(data, grant["id"] if grant else None))
+            return respond(self.server.quality.prepare(data, grant["id"] if grant else None), grant)
         if method == "POST" and path == "/api/ai/proposals":
             grant = vault.auth(token, permission="propose")
             payload, confirmation = self.server.quality.confirmed(data, grant["id"] if grant else None)
@@ -270,5 +273,5 @@ class Handler(BaseHTTPRequestHandler):
                 return result
             result = vault.mutate(submit)
             self.server.quality.consume(data["reviewToken"])
-            return self.respond(200, result)
+            return respond(result, grant)
         raise Problem("Endpoint not found.", 404)

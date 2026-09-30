@@ -377,13 +377,14 @@ class Vault:
 
     def grant(self, data):
         name = text(data.get("name"), "connection name", 100, True)
+        alias = text(data.get("vaultAlias", "memory"), "vault alias", 100, True)
         ids, permissions = data.get("nodeIds"), data.get("permissions")
         if not isinstance(ids, list) or not ids or len(ids) > 500 or any(not isinstance(i, str) or i not in self.heads() for i in ids):
             raise Problem("Select existing nodes for this connection.")
         if not isinstance(permissions, list) or not permissions or any(not isinstance(p, str) or p not in {"search", "read", "propose"} for p in permissions):
             raise Problem("Only search, read, and propose permissions are supported.")
         token = secrets.token_urlsafe(32)
-        conn = {"id": uuid4().hex, "name": name, "nodeIds": sorted(set(ids)),
+        conn = {"id": uuid4().hex, "name": name, "vaultAlias": alias, "nodeIds": sorted(set(ids)),
                 "permissions": sorted(set(permissions)), "revoked": False, "createdAt": now(),
                 "tokenHash": hashlib.sha256(token.encode()).hexdigest()}
         self.db.execute("INSERT INTO connections VALUES (?,?)", (conn["id"], canonical(conn)))
