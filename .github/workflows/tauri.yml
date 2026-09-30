@@ -67,7 +67,7 @@ jobs:
         run: |
           try {
             $manifest = Get-Content src-tauri/Cargo.toml -Raw
-            $manifest.Replace('version = "0.3.0"', 'version = "0.2.99"') | Set-Content src-tauri/Cargo.toml
+            ($manifest -replace '(?m)^version = "[^"]+"', 'version = "0.2.99"') | Set-Content src-tauri/Cargo.toml
             $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
             $config.version = '0.2.99'
             $config | ConvertTo-Json -Depth 20 | Set-Content src-tauri/tauri.conf.json

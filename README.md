@@ -29,7 +29,7 @@ The UI opens directly in the desktop window. The locked screen does not decrypt 
 
 The default vault is in the operating system's Alve application-data directory. `ALVE_DATA_DIR` selects another directory; `ALVE_API_PORT` selects the loopback AI port. The native app exposes only scoped AI routes over HTTP; owner operations use local Tauri IPC. **AI contract** shows the active HTTP endpoint. If the preferred port is busy, the app chooses an available loopback port.
 
-See [native operation and migration](docs/tauri.md). Native phone builds and automatic LAN synchronization remain future work.
+See [native operation and migration](docs/tauri.md) and [storage, backups, and synchronization](docs/storage-and-sync.md). Native phone builds and automatic LAN synchronization remain future work.
 
 ## Run the Python reference POC
 
