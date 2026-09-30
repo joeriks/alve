@@ -28,7 +28,7 @@ Both runtimes use `.process-lock` in the data directory to prevent simultaneous 
 
 ## AI clients
 
-Create a connection in the native UI. Open **AI contract** to see the actual localhost endpoint, especially if the preferred port was unavailable. Configure the native `alve-mcp` executable with `ALVE_URL` and `ALVE_TOKEN`. No vault passphrase is passed to the AI client.
+Create a connection in the native UI. Open **Connect an AI** for setup instructions and the actual localhost endpoint, especially if the preferred port was unavailable. Configure the native `alve-mcp` executable with `ALVE_URL` and `ALVE_TOKEN`. No vault passphrase is passed to the AI client.
 
 ```json
 {
