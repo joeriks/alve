@@ -107,6 +107,7 @@ impl Engine {
             ("POST", "/api/nodes") => self.vault.mutate(|v| v.add_node(data, None, None, "user")),
             ("POST", "/api/relations") => self.vault.mutate(|v| v.add_relation(data)),
             ("POST", "/api/connections") => self.vault.mutate(|v| v.grant(data)),
+            ("POST", "/api/proposals/review-batch") => self.vault.mutate(|v| v.review_batch(data)),
             _ => {
                 if method == "PATCH" && parts.len() == 3 && parts[..2] == ["api", "nodes"] {
                     let heads = self.vault.heads()?;

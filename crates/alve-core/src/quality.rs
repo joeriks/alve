@@ -69,8 +69,9 @@ impl QualityGate {
         "action":action,"nodeId":payload.get("nodeId"),"expectedRevision":payload.get("expectedRevision"),"expiresInSeconds":600,
         "checks":{"lengthWithinLimit":true,"explicitCategory":true,"typedFactsValid":true,"factualTruthVerified":false},
         "instructions":[
+            "For several related memories, collect all prepared previews and ask once for explicit confirmation of the complete set, including tags. Each submitted proposal must match its preview. Never include later or changed items in that confirmation.",
             "This is how the information will be stored. Show this to the user and request confirmation.",
-            "Show the exact heading, content, categories, facts, references and qualifications. Request explicit user confirmation. Do not invent or automatically confirm user agreement. If the client cannot ask the user, stop here.",
+            "Show the exact heading, content, categories, tags (or explicitly no tags), facts, references and qualifications. Request explicit user confirmation. Do not invent or automatically confirm user agreement. If the client cannot ask the user, stop here.",
             "Confirm concise: one useful memory, no transcript or repeated explanation. Confirm accurateToSource: faithfully preserve exact dates, amounts, units and qualifications; this is not proof of truth. Confirm structured: correct categories and typed hard data.",
             "State sourceBasis, a brief basis explanation and uncertainties. Mark inference and unknowns in the memory itself. User changes require a new preparation.",
             "Updates replace the complete node content. Read the current node and preserve fields unless the user requests removal. Submission creates only a proposal; owner approval in Alve remains required."

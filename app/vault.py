@@ -440,6 +440,35 @@ class Vault:
         self.db.execute("UPDATE proposals SET payload=? WHERE id=?", (canonical(proposal), identifier))
         return {"proposal": proposal, "node": result}
 
+    def review_batch(self, data):
+        if not isinstance(data, dict) or set(data) - {"proposalIds", "action", "groupTitle"}:
+            raise Problem("Invalid batch review request.")
+        identifiers, action = data.get("proposalIds"), data.get("action")
+        if (not isinstance(identifiers, list) or not 1 <= len(identifiers) <= 50
+                or any(not isinstance(identifier, str) or not identifier for identifier in identifiers)
+                or len(set(identifiers)) != len(identifiers) or not isinstance(action, str) or action not in {"approve", "reject"}):
+            raise Problem("Use 1 to 50 unique proposal IDs and approve or reject.")
+        group_title = None
+        if "groupTitle" in data:
+            if action != "approve" or len(identifiers) < 2:
+                raise Problem("A group is available only when approving at least two proposals.")
+            group_title = text(data["groupTitle"], "group title", 200, True)
+        # Validate each pending proposal before any write, so a rejected batch does not
+        # temporarily modify a proposal even inside callers that do not use mutate().
+        for identifier in identifiers:
+            row = self.db.execute("SELECT payload FROM proposals WHERE id=?", (identifier,)).fetchone()
+            if not row or json.loads(row[0]).get("status") != "pending":
+                raise Problem("A selected proposal is missing or already reviewed.", 409)
+        reviews = [self.review(identifier, action == "approve") for identifier in identifiers]
+        group, relations = None, []
+        if group_title is not None:
+            group = self.add_node({"title": group_title, "body": "Groups the selected memories.",
+                                   "type": "project", "kind": "record", "tags": [], "facts": [], "references": []})
+            for review in reviews:
+                node = review["node"]
+                relations.append(self.add_relation({"fromId": node["id"], "toId": group["id"], "type": "belongs_to"}))
+        return {"reviews": reviews, "group": group, "relations": relations}
+
     def export(self):
         return {"format": "alve-poc-1", "vaultId": self.vault_id,
                 "revisions": self.rows("revisions"), "relations": self.rows("relations")}

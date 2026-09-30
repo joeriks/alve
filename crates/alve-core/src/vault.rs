@@ -599,6 +599,108 @@ impl Vault {
         )?;
         Ok(json!({"proposal":p,"node":node}))
     }
+    pub fn review_batch(&mut self, data: &Value) -> Result<Value> {
+        let object = data
+            .as_object()
+            .ok_or_else(|| Error::new(400, "Invalid batch review request."))?;
+        if object
+            .keys()
+            .any(|key| !matches!(key.as_str(), "proposalIds" | "action" | "groupTitle"))
+        {
+            return Err(Error::new(400, "Invalid batch review request."));
+        }
+        let ids = data["proposalIds"].as_array().ok_or_else(|| {
+            Error::new(
+                400,
+                "Use 1 to 50 unique proposal IDs and approve or reject.",
+            )
+        })?;
+        let action = data["action"]
+            .as_str()
+            .filter(|x| matches!(*x, "approve" | "reject"))
+            .ok_or_else(|| {
+                Error::new(
+                    400,
+                    "Use 1 to 50 unique proposal IDs and approve or reject.",
+                )
+            })?;
+        if ids.is_empty() || ids.len() > 50 {
+            return Err(Error::new(
+                400,
+                "Use 1 to 50 unique proposal IDs and approve or reject.",
+            ));
+        }
+        let ids = ids
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|x| !x.is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| {
+                        Error::new(
+                            400,
+                            "Use 1 to 50 unique proposal IDs and approve or reject.",
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len() {
+            return Err(Error::new(
+                400,
+                "Use 1 to 50 unique proposal IDs and approve or reject.",
+            ));
+        }
+        let group = match data.get("groupTitle") {
+            None => None,
+            Some(value) => {
+                if action != "approve" || ids.len() < 2 {
+                    return Err(Error::new(
+                        400,
+                        "A group is available only when approving at least two proposals.",
+                    ));
+                }
+                Some(text(Some(value), "group title", 200, true)?)
+            }
+        };
+        for id in &ids {
+            let raw: Option<String> = self
+                .require()?
+                .query_row(
+                    "SELECT payload FROM proposals WHERE id=?",
+                    params![id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let value: Value = serde_json::from_str(&raw.ok_or_else(|| {
+                Error::new(409, "A selected proposal is missing or already reviewed.")
+            })?)?;
+            if value["status"] != "pending" {
+                return Err(Error::new(
+                    409,
+                    "A selected proposal is missing or already reviewed.",
+                ));
+            }
+        }
+        let reviews = ids
+            .iter()
+            .map(|id| self.review(id, action == "approve"))
+            .collect::<Result<Vec<_>>>()?;
+        let mut relations = Vec::new();
+        let group_node = if let Some(title) = group {
+            let node=self.add_node(&json!({"title":title,"body":"Groups the selected memories.","type":"project","kind":"record","tags":[],"facts":[],"references":[]}),None,None,"user")?;
+            for review in &reviews {
+                let member = &review["node"];
+                relations.push(self.add_relation(
+                    &json!({"fromId":member["id"],"toId":node["id"],"type":"belongs_to"}),
+                )?);
+            }
+            Some(node)
+        } else {
+            None
+        };
+        Ok(json!({"reviews":reviews,"group":group_node,"relations":relations}))
+    }
     pub fn record_quality(&mut self, id: &str, quality: &Value) -> Result<()> {
         let raw: String = self.require()?.query_row(
             "SELECT payload FROM proposals WHERE id=?",

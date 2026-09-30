@@ -38,8 +38,9 @@ class QualityGate:
                 "checks": {"lengthWithinLimit": True, "explicitCategory": True, "typedFactsValid": True,
                            "factualTruthVerified": False},
                 "instructions": [
+                    'For several related memories, collect all prepared previews and ask once for explicit confirmation of the complete set, including tags. Each submitted proposal must match its preview. Never include later or changed items in that confirmation.',
                     "This is how the information will be stored. Show this to the user and request confirmation.",
-                    "This is how the information will be stored. Show the exact preview, including categories, facts, references and any qualifications, to the user and ask: Is this concise, correctly represented, and categorized appropriately?",
+                    "This is how the information will be stored. Show the exact preview, including categories, exact tags (or no tags), facts, references and any qualifications, to the user and ask: Is this concise, correctly represented, and categorized appropriately?",
                     "Request explicit user confirmation. Do not submit until the user agrees. If the client cannot ask the user, stop here. User changes require a new preparation and confirmation.",
                     "For update, this preview replaces the complete node content. Read the existing node first and preserve facts, references, and other fields unless the user explicitly requests their removal.",
                     "Review this exact prepared content before confirming. Do not automatically confirm.",

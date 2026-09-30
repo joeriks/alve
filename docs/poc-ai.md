@@ -117,6 +117,8 @@ After explicit user confirmation, call `propose_memory` with only the returned `
 
 Use `Authorization: Bearer YOUR_SCOPED_CONNECTION_TOKEN`. GET `/api/ai/contract` describes the API and writing rules. Use `POST /api/ai/proposals/prepare` with the complete candidate, then `POST /api/ai/proposals` with only the review token and confirmation. Other endpoints are listed in [app/server.py](../app/server.py). Responses are not cached; foreign browser origins are rejected, while authenticated local non-browser clients can call without an Origin header.
 
+Owners can review up to 50 pending proposals atomically with `POST /api/proposals/review-batch`, using unique `proposalIds` and `action` `approve` or `reject`. An approval batch may explicitly supply `groupTitle` for two or more proposals; Alve then creates an owner-origin project and `belongs_to` relations. Any invalid, stale, revoked, or missing proposal rejects the whole batch without saving partial reviews or grouping.
+
 The server must remain running and the vault unlocked. The bridge connects only to explicit localhost HTTP URLs and refuses redirects. There is no network discovery, remote MCP listener, or automatic provider configuration.
 
 ## Local-only usage
@@ -124,3 +126,9 @@ The server must remain running and the vault unlocked. The bridge connects only 
 Use a local AI client/model if no content may leave your devices. A cloud AI client can upload the data returned by a local tool. Alve enforces API scope but cannot control what an authorized client does with returned information.
 
 The POC tests the MCP-to-API read/proposal flow with synthetic requests. It does not install a model or claim that a specific third-party AI client has been tested.
+
+## Reviewing related memories together
+
+An AI client may prepare several related memories, show all exact previews (including tags or no tags), and ask for one explicit confirmation covering that complete set. Each proposal still uses its own bound review token; changed or later proposals need fresh confirmation.
+
+In **Proposals**, select the memories to review and approve once. Optional shared grouping creates an owner-confirmed project node and `belongs_to` relations in the same atomic transaction. Tags are preserved exactly, not inferred from the AI conversation. Shared tags alone create no relation. The owner can inspect Tags / No tags before approval and search tags in the memory list. Existing saved memories are not modified by this workflow.
