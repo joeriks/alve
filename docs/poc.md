@@ -10,7 +10,8 @@
 - Atomic encrypted writes; failed persistence rolls back the in-memory mutation.
 - Loopback-only API with owner bearer sessions and separate per-connection AI tokens.
 - Explicit AI node scopes, search/read/propose permissions, revocation, and owner-reviewed proposals.
-- Local stdio MCP bridge exposing the usage contract and four memory tools.
+- Mandatory AI preparation: exact categorized preview, request for human confirmation, then an explicit attestation before owner review.
+- Local stdio MCP bridge exposing the usage contract and five memory tools.
 - Encrypted graph/history bundles, restore into a new installation, and idempotent same-vault merge.
 
 ## Run and unlock
@@ -54,6 +55,8 @@ Restore only works on an installation without an existing vault. Import merges i
 - Uses established cryptographic primitives through `cryptography`; the POC-specific file envelope and key lifecycle are not an audited standard.
 - The file header authenticates the format and vault identity. Tampering is detected, but replay of an older valid snapshot is not.
 - Fixed limits: 16 MiB per encrypted file, 5,000 revisions, 5,000 relations, 30 facts per node. These are explicit POC limits, not importance rankings.
+- AI proposals additionally require explicit type/kind, a heading of at most 120 characters, and a body of at most 300 whitespace-separated words and 2,000 characters. These enforce length and structure, not truth or importance. See the AI contract for the confirmation handshake.
+- Human confirmation reported by an AI client is an attestation, not proof that a human agreed. Separate owner approval in Alve remains mandatory.
 - No full-disk/memory protection, secure memory erasure, hardware key custody, automatic OS backup controls, cryptographic peer identities, or key rotation. A compromised unlocked device can read the memory.
 - References support titles and HTTP(S) links; no automatic URL fetching or attachment storage. Event nodes are records, not a complete calendar.
 - No outgoing model calls, analytics, or external AI fallback. The MCP client can itself be cloud-hosted: any memory returned to that client may leave this computer. Choose the client accordingly.

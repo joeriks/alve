@@ -17,6 +17,8 @@ from app.server import AlveServer
 from app.vault import BUNDLE, Problem, Vault, canonical, envelope
 
 PASSWORD = "a long test passphrase only"
+CONFIRMATION = {"userConfirmed": True, "concise": True, "accurateToSource": True, "structured": True,
+                "sourceBasis": "user_statement", "basis": "Synthetic explicit user confirmation.", "uncertainties": ""}
 
 
 class VaultTests(unittest.TestCase):
@@ -240,6 +242,50 @@ class HTTPTests(unittest.TestCase):
         except HTTPError as exc:
             return exc.code, json.loads(exc.read())
 
+    def prepare_and_submit(self, data, token):
+        content = {"type": "memory", "kind": "record", **data["content"]}
+        status, preview = self.request("/api/ai/proposals/prepare", {**data, "content": content}, token)
+        self.assertEqual(status, 200)
+        return self.request("/api/ai/proposals", {"reviewToken": preview["reviewToken"], "confirmation": CONFIRMATION}, token)
+
+    def test_ai_confirmation_is_mandatory_and_single_use(self):
+        _, node = self.request("/api/nodes", {"title": "Allowed"}, self.admin)
+        _, c = self.request("/api/connections", {"name": "AI", "nodeIds": [node["id"]], "permissions": ["propose"]}, self.admin)
+        token = c["token"]
+        body = {"content": {"title": "Candidate", "type": "memory", "kind": "insight"}}
+        self.assertEqual(self.request("/api/ai/proposals", body, token)[0], 422)
+        status, preview = self.request("/api/ai/proposals/prepare", body, token)
+        self.assertEqual(status, 200)
+        _, before = self.request("/api/graph", token=self.admin)
+        self.assertEqual(before["proposals"], [])
+        self.assertEqual(len(before["nodes"]), 1)
+        final = {"reviewToken": preview["reviewToken"], "confirmation": CONFIRMATION}
+        self.assertEqual(self.request("/api/ai/proposals", {**final, "confirmation": {**CONFIRMATION, "userConfirmed": False}}, token)[0], 422)
+        self.assertEqual(self.request("/api/ai/proposals", {**final, "content": body["content"]}, token)[0], 422)
+        status, p = self.request("/api/ai/proposals", final, token)
+        self.assertEqual(status, 200)
+        self.assertEqual(p["status"], "pending")
+        self.assertTrue(p["qualityConfirmation"]["userConfirmed"])
+        self.assertEqual(self.request("/api/ai/proposals", final, token)[0], 409)
+        _, after = self.request("/api/graph", token=self.admin)
+        self.assertEqual(len(after["nodes"]), 1)
+        self.assertEqual(len(after["proposals"]), 1)
+
+    def test_prepare_update_scope_and_lock_boundary(self):
+        _, node = self.request("/api/nodes", {"title": "Allowed"}, self.admin)
+        _, hidden = self.request("/api/nodes", {"title": "Hidden"}, self.admin)
+        _, c = self.request("/api/connections", {"name": "AI", "nodeIds": [node["id"]], "permissions": ["propose"]}, self.admin)
+        body = {"action": "update", "nodeId": hidden["id"], "expectedRevision": hidden["revisionId"],
+                "content": {"title": "Candidate", "type": "memory", "kind": "insight"}}
+        self.assertEqual(self.request("/api/ai/proposals/prepare", body, c["token"])[0], 404)
+        status, _ = self.request("/api/ai/proposals/prepare", body, self.admin)
+        self.assertEqual(status, 200)
+        _, preview = self.request("/api/ai/proposals/prepare", {"content": body["content"]}, c["token"])
+        self.request("/api/lock", {}, self.admin)
+        _, unlocked = self.request("/api/unlock", {"password": PASSWORD})
+        self.admin = unlocked["token"]
+        self.assertEqual(self.request("/api/ai/proposals", {"reviewToken": preview["reviewToken"], "confirmation": CONFIRMATION}, c["token"])[0], 409)
+
     def test_origin_host_and_auth_boundaries(self):
         self.assertEqual(self.request("/api/graph")[0], 401)
         self.assertEqual(self.request("/api/graph", token=self.admin, headers={"Origin": "https://evil.example"})[0], 403)
@@ -263,7 +309,7 @@ class HTTPTests(unittest.TestCase):
         _, result = self.request("/api/ai/nodes/" + node["id"] + "/relations", token=c["token"])
         self.assertEqual(result["relations"], [])
         self.assertEqual(self.request("/api/nodes", {"title": "AI direct write"}, c["token"])[0], 403)
-        _, proposal = self.request("/api/ai/proposals", {"content": {"title": "Candidate", "body": "Reviewed memory."}}, c["token"])
+        _, proposal = self.prepare_and_submit({"content": {"title": "Candidate", "body": "Reviewed memory."}}, c["token"])
         _, before = self.request("/api/graph", token=self.admin)
         self.assertEqual(len(before["nodes"]), 2)
         self.assertEqual(self.request("/api/proposals/" + proposal["id"] + "/approve", {}, self.admin)[0], 200)
@@ -276,7 +322,7 @@ class HTTPTests(unittest.TestCase):
         _, node = self.request("/api/nodes", {"title": "Original"}, self.admin)
         pids = []
         for title in ("One", "Two"):
-            _, proposal = self.request("/api/ai/proposals", {"action": "update", "nodeId": node["id"],
+            _, proposal = self.prepare_and_submit({"action": "update", "nodeId": node["id"],
                 "expectedRevision": node["revisionId"], "content": {"title": title}}, self.admin)
             pids.append(proposal["id"])
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -291,7 +337,7 @@ class HTTPTests(unittest.TestCase):
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
             {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "search_memory", "arguments": {"query": "MCP"}}},
-            {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "propose_memory", "arguments": {"content": {"title": "MCP proposal"}}}},
+            {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "prepare_memory", "arguments": {"content": {"title": "MCP proposal", "type": "memory", "kind": "record"}}}},
         ]
         run = subprocess.run([sys.executable, "-m", "app.mcp_bridge"], input="\n".join(json.dumps(m) for m in messages) + "\n",
                              capture_output=True, text=True, timeout=20,
@@ -302,6 +348,13 @@ class HTTPTests(unittest.TestCase):
         search = json.loads(results[2]["result"]["content"][0]["text"])
         self.assertEqual(search["nodes"][0]["id"], node["id"])
         self.assertEqual(len(self.v.graph()["nodes"]), 1)
+        self.assertEqual(self.v.graph()["proposals"], [])
+        preview = json.loads(results[3]["result"]["content"][0]["text"])
+        final = {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "propose_memory", "arguments": {"reviewToken": preview["reviewToken"], "confirmation": CONFIRMATION}}}
+        run = subprocess.run([sys.executable, "-m", "app.mcp_bridge"], input=json.dumps(final) + "\n", capture_output=True, text=True, timeout=20,
+                             env={**os.environ, "ALVE_URL": self.base, "ALVE_TOKEN": c["token"]})
+        self.assertEqual(run.returncode, 0)
+        self.assertFalse(json.loads(run.stdout)["result"]["isError"])
         self.assertEqual(self.v.graph()["proposals"][0]["content"]["title"], "MCP proposal")
 
 

@@ -36,11 +36,81 @@ def api(path, body=None):
             return json.load(response)
     except HTTPError as exc:
         try:
-            error = json.loads(exc.read(4096)).get("error", "API request denied")
-        except ValueError:
+            detail = json.loads(exc.read(4096)).get("error")
+            error = detail.strip()[:1000] if isinstance(detail, str) and detail.strip() else "API request denied"
+        except (ValueError, UnicodeDecodeError):
             error = "API request denied"
         raise ValueError(f"Alve API {exc.code}: {error}") from None
 
+
+FACT_VALUE = {
+    "type": "object",
+    "properties": {
+        "type": {"type": "string", "enum": ["text", "boolean", "date", "datetime", "money", "quantity"]},
+        "value": {"oneOf": [{"type": "string"}, {"type": "boolean"}]},
+        "timeZone": {"type": "string", "maxLength": 80},
+        # Decimal amounts remain strings so a client cannot silently round money or quantities.
+        "amount": {"type": "string", "maxLength": 80},
+        "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+        "unit": {"type": "string", "maxLength": 40},
+    },
+    "required": ["type"],
+    "additionalProperties": False,
+}
+
+CONTENT = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string", "minLength": 1, "maxLength": 120},
+        "body": {"type": "string", "maxLength": 2000,
+                 "description": "Use at most 300 whitespace-separated words."},
+        "type": {"type": "string", "enum": ["memory", "project", "person", "event", "document"]},
+        "kind": {"type": "string", "enum": ["decision", "preference", "insight", "commitment", "record"]},
+        "tags": {"type": "array", "maxItems": 20, "items": {"type": "string", "minLength": 1, "maxLength": 60}},
+        "facts": {"type": "array", "maxItems": 30, "items": {"type": "object", "properties": {
+            "key": {"type": "string", "minLength": 1, "maxLength": 80},
+            "label": {"type": "string", "minLength": 1, "maxLength": 120},
+            "value": {"oneOf": [FACT_VALUE, {"type": "null"}]},
+            "precision": {"type": "string", "enum": ["exact", "approximate", "estimated"]},
+        }, "required": ["key", "label"], "additionalProperties": False}},
+        "references": {"type": "array", "maxItems": 20, "items": {"type": "object", "properties": {
+            "title": {"type": "string", "minLength": 1, "maxLength": 200},
+            "url": {"type": "string", "maxLength": 2000, "pattern": "^https?://"},
+        }, "required": ["title"], "additionalProperties": False}},
+        "status": {"type": "string", "enum": ["active", "archived"]},
+    },
+    "required": ["title", "type", "kind"],
+    "additionalProperties": False,
+}
+
+PREPARE_INPUT = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["create", "update"], "default": "create"},
+        "nodeId": {"type": "string", "minLength": 1},
+        "expectedRevision": {"type": "string", "minLength": 1},
+        "content": CONTENT,
+    },
+    "required": ["content"],
+    "allOf": [{"if": {"properties": {"action": {"const": "update"}}, "required": ["action"]},
+               "then": {"required": ["nodeId", "expectedRevision"]}}],
+    "additionalProperties": False,
+}
+
+FINAL_CONFIRMATION = {
+    "type": "object",
+    "properties": {
+        "concise": {"const": True},
+        "accurateToSource": {"const": True},
+        "structured": {"const": True},
+        "userConfirmed": {"const": True},
+        "sourceBasis": {"type": "string", "enum": ["user_statement", "reference", "inference", "unknown"]},
+        "basis": {"type": "string", "minLength": 1, "maxLength": 500},
+        "uncertainties": {"type": "string", "maxLength": 1000},
+    },
+    "required": ["concise", "accurateToSource", "structured", "userConfirmed", "sourceBasis", "basis", "uncertainties"],
+    "additionalProperties": False,
+}
 
 TOOLS = [
     {"name": "search_memory", "description": "Search allowed human-readable memories. Results may be stale while peers are offline.",
@@ -49,12 +119,12 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"node_id": {"type": "string"}}, "required": ["node_id"]}},
     {"name": "get_relations", "description": "Read only relations whose endpoints are both allowed.",
      "inputSchema": {"type": "object", "properties": {"node_id": {"type": "string"}}, "required": ["node_id"]}},
-    {"name": "propose_memory", "description": "Submit a concise memory for owner review. This does not create confirmed memory.",
+    {"name": "prepare_memory", "description": "Check a complete proposed memory and issue a one-time review token. This stores nothing. Show the returned preview to the user and request explicit confirmation before propose_memory.",
+     "inputSchema": PREPARE_INPUT},
+    {"name": "propose_memory", "description": "Submit a previously prepared proposal for owner review only after explicit human confirmation. Never auto-confirm: attest each check, set userConfirmed true only after confirmation, and use the reviewToken unchanged.",
      "inputSchema": {"type": "object", "properties": {
-         "action": {"type": "string", "enum": ["create", "update"]},
-         "nodeId": {"type": "string"}, "expectedRevision": {"type": "string"},
-         "content": {"type": "object", "properties": {"title": {"type": "string"}, "body": {"type": "string"}}, "required": ["title"]}},
-         "required": ["content"]}},
+         "reviewToken": {"type": "string", "minLength": 1}, "confirmation": FINAL_CONFIRMATION},
+         "required": ["reviewToken", "confirmation"], "additionalProperties": False}},
 ]
 
 
@@ -72,7 +142,7 @@ def handle(message):
         if method == "initialize":
             result = {"protocolVersion": PROTOCOL, "capabilities": {"tools": {}, "resources": {}},
                       "serverInfo": {"name": "alve-local-memory-poc", "version": "0.1.0"},
-                      "instructions": "Read alve://usage before using memory. All writes are owner-reviewed proposals."}
+                      "instructions": "Read alve://usage before using memory. Prepare a candidate, show its full preview to the user, obtain explicit confirmation, then propose it. All writes remain owner-reviewed proposals."}
         elif method == "ping":
             result = {}
         elif method == "tools/list":
@@ -95,13 +165,15 @@ def handle(message):
                     if not isinstance(node_id, str) or not node_id:
                         raise ValueError("node_id is required")
                     data = api("/api/ai/nodes/" + quote(node_id, safe="") + ("/relations" if name == "get_relations" else ""))
+                elif name == "prepare_memory":
+                    data = api("/api/ai/proposals/prepare", args)
                 elif name == "propose_memory":
                     data = api("/api/ai/proposals", args)
                 else:
                     raise ValueError("Unknown tool")
                 result = {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False)}], "isError": False}
-            except (ValueError, OSError):
-                result = {"content": [{"type": "text", "text": "The local memory request failed or was denied. Check the vault, connection permissions, and input."}], "isError": True}
+            except (ValueError, OSError) as exc:
+                result = {"content": [{"type": "text", "text": str(exc)[:1200]}], "isError": True}
         else:
             return {"jsonrpc": "2.0", "id": identifier, "error": {"code": -32601, "message": "Method not found"}}
         return {"jsonrpc": "2.0", "id": identifier, "result": result}
