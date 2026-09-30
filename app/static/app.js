@@ -13,6 +13,8 @@
   const short = (s,n=110) => s && s.length>n ? `${s.slice(0,n)}…` : (s || 'No description');
   const btn = (text, cls='secondary', fn) => el('button',{class:cls,type:'button',onClick:async event=>{try{await fn(event)}catch(error){toast(error.message||'The action could not be completed.',true)}},text});
 
+  window.addEventListener('alve-before-update',event=>{if(state.current==='editor')event.preventDefault();});
+  window.addEventListener('alve-update-lock',()=>{lockLocal();});
   async function status() { try { const s=await api('/api/status'); setupGate(s); } catch(e) { $('#gate-error').textContent=e.message; } }
   function setupGate(s) { $('#gate-title').textContent=s.exists?'Open your local vault':'Create your local vault'; $('#gate-copy').textContent=s.exists?'Your memories stay on this device. Enter your vault password to continue.':'Choose a password. Alve will create an encrypted local vault on this device.'; $('#unlock-submit').textContent=s.exists?'Unlock vault':'Create vault'; $('#password-note').textContent=s.exists?'Use the password you chose when creating this vault.':'Use at least 12 characters. This password cannot be recovered by Alve.'; $('#password').minLength=s.exists?0:12; $('#unlock-form').dataset.create = String(!s.exists); $('.restore-panel').classList.toggle('hidden',s.exists); }
   async function enter(data) { state.token=data.token; document.querySelectorAll('input[type="password"]').forEach(x=>x.value=''); $('#gate').classList.add('hidden'); $('#app').classList.remove('hidden'); await refresh(); }

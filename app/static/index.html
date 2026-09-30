@@ -30,6 +30,7 @@
         </form>
       </details>
       <p id="gate-error" class="form-error" role="alert"></p>
+      <button class="secondary native-update hidden" type="button" data-native-update>Check for desktop updates</button>
     </div>
   </section>
 
@@ -50,6 +51,7 @@
       <div class="sidebar-bottom">
         <button data-view="ai" class="nav-item"><span>⊹</span> AI contract</button>
         <button id="lock" class="nav-item quiet"><span>⏻</span> Lock vault</button>
+        <button class="nav-item quiet hidden" type="button" data-native-update><span>↑</span> Check for updates</button>
       </div>
     </aside>
     <section class="workspace">
@@ -59,5 +61,6 @@
     </section>
   </main>
   <script src="/app.js" defer></script>
+  <script src="/updates.js" defer></script>
 </body>
 </html>

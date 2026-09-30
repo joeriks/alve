@@ -1,1 +1,14 @@
-{"name":"alve","private":true,"version":"0.2.0","scripts":{"check":"node --check app/static/app.js","tauri":"tauri","dev":"tauri dev","build":"tauri build"},"devDependencies":{"@tauri-apps/cli":"^2"}}
+{
+  "name": "alve",
+  "private": true,
+  "version": "0.3.0",
+  "scripts": {
+    "check": "node --check app/static/app.js && node --check app/static/updates.js",
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

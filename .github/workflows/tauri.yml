@@ -32,6 +32,7 @@ jobs:
             ~/.cargo/git
             target
           key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: native-${{ runner.os }}-${{ runner.arch }}-
       - run: npm ci
       - uses: actions/setup-python@v5
         with:
@@ -48,11 +49,12 @@ jobs:
       - run: cargo test -p alve --locked
       - run: cargo build -p alve-core --bin alve-mcp --release --locked
       - run: npm run check
-      - run: npm run build -- --no-bundle
+      - run: npm run build -- --bundles nsis
       - uses: actions/upload-artifact@v4
         with:
           name: alve-${{ matrix.os }}
           path: |
+            target/release/bundle/nsis/*-setup.exe
             target/release/alve.exe
             target/release/alve-mcp.exe
             target/debug/alve-core-check.exe
@@ -66,3 +68,4 @@ jobs:
             ~/.cargo/git
             target
           key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+

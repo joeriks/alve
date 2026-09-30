@@ -1,4 +1,5 @@
 mod http;
+mod updater;
 
 use base64::Engine as _;
 use serde_json::Value;
@@ -6,7 +7,8 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
-use tauri::{AppHandle, Manager, State};
+use tauri::menu::{MenuBuilder, SubmenuBuilder};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -24,15 +26,20 @@ async fn alve_request(
     path: String,
     body: Option<Value>,
     token: Option<String>,
+    updates: State<'_, updater::UpdateState>,
 ) -> Result<Value, String> {
     if window.label() != "main" {
         return Err("Local main window required.".into());
     }
+    let installing = updates.installing.clone();
     let engine = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut engine = engine
             .lock()
             .map_err(|_| "Local vault is busy.".to_string())?;
+        if installing.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err("An update is installing. Wait for Alve to restart.".into());
+        }
         engine
             .request(
                 &method,
@@ -127,7 +134,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::UpdateState::default())
         .setup(|app| {
+            let help = SubmenuBuilder::new(app, "Help")
+                .text("check_updates", "Check for updates…")
+                .build()?;
+            app.set_menu(MenuBuilder::new(app).item(&help).build()?)?;
+            app.on_menu_event(|app, event| {
+                if event.id().as_ref() == "check_updates" {
+                    let _ = app.emit("alve-check-for-updates", ());
+                }
+            });
             let dir = std::env::var_os("ALVE_DATA_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| {
@@ -147,7 +165,9 @@ pub fn run() {
             alve_request,
             service_info,
             save_export,
-            open_reference
+            open_reference,
+            updater::check_update,
+            updater::install_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running Alve");

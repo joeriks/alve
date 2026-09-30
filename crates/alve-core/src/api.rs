@@ -27,6 +27,10 @@ impl Engine {
             unlock_after: Instant::now(),
         })
     }
+    pub fn lock_for_update(&mut self) {
+        self.vault.lock();
+        self.quality.clear();
+    }
     pub fn request(
         &mut self,
         method: &str,
