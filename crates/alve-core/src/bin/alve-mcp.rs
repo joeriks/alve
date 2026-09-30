@@ -302,13 +302,27 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_exposes_exactly_seven_tools() {
+    fn tools_list_exposes_memory_and_agent_workflow() {
         let response =
             handle(json!({"jsonrpc":"2.0","id":8,"method":"tools/list","params":{}})).unwrap();
         let tools = response["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 12);
         assert_eq!(tools[0]["name"], "search_memory");
         assert_eq!(tools[6]["name"], "propose_memory_batch");
+        let agent_tools: Vec<_> = tools[7..]
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            agent_tools,
+            vec![
+                "list_agent_assignments",
+                "get_agent_briefing",
+                "get_agent_run",
+                "prepare_agent_report",
+                "submit_agent_report"
+            ]
+        );
     }
 
     #[test]
