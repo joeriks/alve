@@ -168,7 +168,7 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(urlsplit(self.path).query)
             if method == "GET" and path == "/favicon.ico":
                 return self.respond(204, b"", "image/x-icon")
-            if method == "GET" and path in {"/", "/app.js", "/agents.js", "/updates.js", "/style.css"}:
+            if method == "GET" and path in {"/", "/app.js", "/agents.js", "/sync.js", "/updates.js", "/style.css"}:
                 file = STATIC / ({"/": "index.html"}.get(path, path[1:]))
                 content_type = {".html": "text/html", ".js": "text/javascript", ".css": "text/css"}[file.suffix]
                 return self.respond(200, file.read_bytes(), content_type + "; charset=utf-8")
