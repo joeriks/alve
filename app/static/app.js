@@ -101,7 +101,7 @@
     const action=selectOf(['new','collect','relate'],mode);
     [...action.options].forEach((o,i)=>o.textContent=['Create a new group','Add to an existing memory or project','Create relations'][i]);
     action.setAttribute('aria-label','Selection action');action.addEventListener('change',()=>{state.selectionAction=action.value;render()});
-    controls.append(el('div',{class:'section-head'},el('strong',{id:'group-panel-count',text:`${state.selectedMemories.size} selected`}),btn('Done','secondary',()=>{state.grouping=false;state.selectedMemories.clear();state.groupTitle='';render()})),field('Action',action));
+    controls.append(el('div',{class:'section-head'},el('strong',{id:'group-panel-count',text:`${state.selectedMemories.size} selected`})),field('Action',action));
     if(mode==='new'){
       const title=el('input',{id:'memory-group-title',maxlength:'120',placeholder:'For example: My responsibilities','aria-label':'New group title'});title.value=state.groupTitle||'';title.addEventListener('input',()=>{state.groupTitle=title.value;updateMemoryGrouping()});controls.append(field('New group title',title));
     }else{
