@@ -121,6 +121,14 @@ async fn save_export(
     .await
     .map_err(|_| "Could not select export destination.")?;
     let Some(path) = path else { return Ok(false) };
+    // The document picker can outlive an unlocked session. Recheck before
+    // writing the buffered export, including plaintext JSON exports.
+    state
+        .lock()
+        .map_err(|_| "Local vault is busy.")?
+        .vault
+        .auth(&token, true, None, None)
+        .map_err(error_message)?;
     #[cfg(target_os = "android")]
     if let tauri_plugin_dialog::FilePath::Url(uri) = path {
         return mobile::write_saf_uri(&window, &uri, bytes).map(|_| true);

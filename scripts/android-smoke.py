@@ -120,6 +120,11 @@ try:
     wait("window.exportOutcome!==null")
     assert evaluate('window.exportOutcome') == {'value': False}, 'Picker cancellation reported success'
     assert evaluate("document.querySelector('#gate').classList.contains('hidden')"), 'Quick picker cancellation locked vault'
+    evaluate("window.exportOutcome=null;Array.from(document.querySelectorAll('#content button')).find(x=>x.textContent==='Export encrypted .alve bundle').click();true")
+    wait("!document.querySelector('#gate').classList.contains('hidden')", seconds=45)
+    save_document()
+    wait("window.exportOutcome!==null")
+    assert evaluate('Boolean(window.exportOutcome.error)'), 'Expired picker session still wrote an export'
     adb('shell', 'am', 'force-stop', APP)
     ws.close()
     adb('shell', 'am', 'start', '-n', f'{APP}/.MainActivity')
@@ -129,7 +134,18 @@ try:
         subprocess.run(['adb','exec-out','screencap','-p'],stdout=image,check=True)
     unlock()
     wait("document.querySelector('#content').textContent.includes('Synthetic Android memory')")
-    (OUT / 'result.txt').write_text('PASS: real Android creation, native save, Back, background lock, reopen, SAF encrypted export and cancel, mobile updater exclusion and backup policy.\n')
+    # Recovery in a fresh synthetic installation must also preserve the memory.
+    adb('shell', 'pm', 'clear', APP)
+    ws.close()
+    adb('shell', 'am', 'start', '-n', f'{APP}/.MainActivity')
+    ws = connect()
+    wait("Boolean(window.__TAURI__?.core?.invoke)")
+    evaluate(f"window.__TAURI__.core.invoke('alve_request',{{method:'POST',path:'/api/restore',body:{{bundle:{json.dumps(args['content'])},password:{json.dumps(PASSWORD)}}}}})")
+    evaluate('location.reload();true')
+    wait("document.querySelector('#gate-title')?.textContent==='Open your local vault'")
+    unlock()
+    wait("document.querySelector('#content').textContent.includes('Synthetic Android memory')")
+    (OUT / 'result.txt').write_text('PASS: real Android creation, native save, Back, background lock, reopen, SAF encrypted export/cancel/session expiry, fresh-install recovery, mobile updater exclusion and backup policy.\n')
     print('Android acceptance passed.')
 finally:
     (OUT / 'logcat.txt').write_text(adb('logcat','-d','-s','alve','chromium','AndroidRuntime'))

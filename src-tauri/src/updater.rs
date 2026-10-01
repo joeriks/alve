@@ -162,19 +162,21 @@ mod tests {
     use super::*;
     #[test]
     fn only_exact_newer_official_architecture_assets_are_accepted() {
-        let url="https://github.com/joeriks/alve/releases/download/v0.4.0/Alve_0.4.0_windows-aarch64-setup.exe";
-        assert!(validate_release("0.4.0", url, "aarch64").is_ok());
+        let current = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        let future = format!("{}.{}.{}", current.major, current.minor, current.patch + 1);
+        let url = format!("https://github.com/joeriks/alve/releases/download/v{future}/Alve_{future}_windows-aarch64-setup.exe");
+        assert!(validate_release(&future, &url, "aarch64").is_ok());
         for invalid in [
             url.replace("github.com", "evil.example"),
             url.replace("https:", "http:"),
             format!("{url}?token=x"),
             url.replace("aarch64", "x86_64"),
         ] {
-            assert!(validate_release("0.4.0", &invalid, "aarch64").is_err());
+            assert!(validate_release(&future, &invalid, "aarch64").is_err());
         }
-        assert!(validate_release("0.3.0", url, "aarch64").is_err());
-        assert!(validate_release("0.2.0", url, "aarch64").is_err());
-        assert!(validate_release("0.4.0-beta.1", url, "aarch64").is_err());
+        assert!(validate_release(env!("CARGO_PKG_VERSION"), &url, "aarch64").is_err());
+        assert!(validate_release("0.2.0", &url, "aarch64").is_err());
+        assert!(validate_release(&format!("{future}-beta.1"), &url, "aarch64").is_err());
     }
     #[test]
     fn production_configuration_requires_signed_versions_and_secure_transport() {
