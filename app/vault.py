@@ -306,7 +306,7 @@ class Vault:
     def graph(self):
         heads = self.heads()
         return {"vaultId": self.vault_id, "nodes": [v[0] for v in heads.values()],
-                "relations": self.rows("relations"),
+                "relations": [r for r in self.rows("relations") if not r.get("deleted", False)],
                 "conflicts": [{"nodeId": k, "revisionIds": [x["revisionId"] for x in v], "versions": v}
                               for k, v in heads.items() if len(v) > 1],
                 "proposals": self.rows("proposals"),
@@ -362,18 +362,51 @@ class Vault:
         return node
 
     def add_relation(self, data):
-        if self.db.execute("SELECT count(*) FROM relations").fetchone()[0] >= MAX_RELATIONS:
-            raise Problem("POC relation limit reached.", 413)
         heads = self.heads()
-        if data.get("fromId") not in heads or data.get("toId") not in heads:
+        if (not isinstance(data, dict) or not isinstance(data.get("fromId"), str)
+                or not isinstance(data.get("toId"), str)
+                or data["fromId"] not in heads or data["toId"] not in heads):
             raise Problem("Relation endpoints must exist.")
+        if data["fromId"] == data["toId"]:
+            raise Problem("A relation cannot link a node to itself.")
+        if any(len(heads[i]) != 1 or heads[i][0].get("status") != "active"
+               for i in (data["fromId"], data["toId"])):
+            raise Problem("A node is inactive or has conflicting versions.", 409)
         if not isinstance(data.get("type"), str) or data.get("type") not in RELATIONS:
             raise Problem("Unsupported relation type.")
+        for relation in self.rows("relations"):
+            if (not relation.get("deleted", False)
+                    and all(relation[k] == data[k] for k in ("fromId", "toId", "type"))):
+                return relation
+        if self.db.execute("SELECT count(*) FROM relations").fetchone()[0] >= MAX_RELATIONS:
+            raise Problem("POC relation limit reached.", 413)
         relation = {"id": uuid4().hex, "fromId": data["fromId"], "toId": data["toId"],
                     "type": data["type"], "vaultId": self.vault_id, "origin": "user",
                     "verification": "user_confirmed", "createdAt": now()}
         self.db.execute("INSERT INTO relations VALUES (?,?)", (relation["id"], canonical(relation)))
         return relation
+
+    def delete_relation(self, relation_id):
+        relation = next((r for r in self.rows("relations") if r["id"] == relation_id), None)
+        if relation is None:
+            raise Problem("Relation not found.", 404)
+        if not relation.get("deleted", False):
+            relation.update(deleted=True, deletedAt=now())
+            self.db.execute("UPDATE relations SET payload=? WHERE id=?", (canonical(relation), relation_id))
+        return relation
+
+    def restore_relation(self, relation_id):
+        records = self.rows("relations")
+        relation = next((r for r in records if r["id"] == relation_id), None)
+        if relation is None:
+            raise Problem("Relation not found.", 404)
+        if not relation.get("deleted", False):
+            raise Problem("Only a removed relation can be restored.", 409)
+        restored = self.add_relation(relation)
+        if restored["id"] not in {r["id"] for r in records}:
+            restored["restoredFrom"] = relation_id
+            self.db.execute("UPDATE relations SET payload=? WHERE id=?", (canonical(restored), restored["id"]))
+        return restored
 
     def add_relations_batch(self, data):
         if not isinstance(data, dict) or set(data) != {"nodeIds", "toId", "type", "expectedRevisions"}:
@@ -405,7 +438,8 @@ class Vault:
                     or current[0].get("revisionId") != expected[identifier]):
                 raise Problem("A node changed, is inactive, or has conflicting versions.", 409)
         existing = {relation["fromId"] for relation in self.rows("relations")
-                    if relation.get("toId") == target and relation.get("type") == relation_type}
+                    if not relation.get("deleted", False)
+                    and relation.get("toId") == target and relation.get("type") == relation_type}
         additions = [identifier for identifier in sources if identifier not in existing]
         count = self.db.execute("SELECT count(*) FROM relations").fetchone()[0]
         if count + len(additions) > MAX_RELATIONS:
@@ -652,16 +686,36 @@ class Vault:
         existing_edges = {r["id"]: r for r in self.rows("relations")}
         edge_additions = {}
         for r in relations:
-            if not isinstance(r, dict) or r.get("vaultId") != vault_id or r.get("type") not in RELATIONS:
+            if (not isinstance(r, dict) or r.get("vaultId") != vault_id
+                    or not isinstance(r.get("type"), str) or r["type"] not in RELATIONS):
                 raise Problem("Invalid relation.")
             eid = text(r.get("id"), "relation ID", 64, True)
-            if r.get("fromId") not in node_ids or r.get("toId") not in node_ids:
+            if (not isinstance(r.get("fromId"), str) or not isinstance(r.get("toId"), str)
+                    or r["fromId"] not in node_ids or r["toId"] not in node_ids):
                 raise Problem("Relation endpoint is missing.")
-            if r.get("verification") != "user_confirmed" or r.get("origin") not in {"user", "import", "ai_proposal"}:
+            if (r.get("verification") != "user_confirmed" or not isinstance(r.get("origin"), str)
+                    or r["origin"] not in {"user", "import", "ai_proposal"}):
                 raise Problem("Invalid relation provenance.")
-            existing = existing_edges.get(eid) or edge_additions.get(eid)
-            if existing and canonical(existing) != canonical(r):
-                raise Problem("A relation ID was reused with different content.", 409)
+            # Absence is the legacy active state; only a complete tombstone is valid.
+            if "deleted" in r or "deletedAt" in r:
+                if r.get("deleted") is not True:
+                    raise Problem("Invalid relation tombstone.")
+                timestamp = text(r.get("deletedAt"), "relation deletion timestamp", 80, True)
+                try:
+                    if datetime.fromisoformat(timestamp.replace("Z", "+00:00")).tzinfo is None:
+                        raise ValueError()
+                except ValueError:
+                    raise Problem("Invalid relation deletion timestamp.") from None
+            if "restoredFrom" in r:
+                text(r["restoredFrom"], "restored relation ID", 64, True)
+            existing = edge_additions.get(eid) or existing_edges.get(eid)
+            if existing:
+                base = lambda edge: {k: v for k, v in edge.items() if k not in {"deleted", "deletedAt"}}
+                if canonical(base(existing)) != canonical(base(r)):
+                    raise Problem("A relation ID was reused with different content.", 409)
+                # Monotonic deletion, including repeated IDs inside the same bundle.
+                deleted = [edge for edge in (existing, r) if edge.get("deleted", False)]
+                r = min(deleted, key=lambda edge: edge["deletedAt"]) if deleted else r
             edge_additions[eid] = r
         added = 0
         for rid, r in incoming.items():
@@ -675,6 +729,8 @@ class Vault:
             if eid not in existing_edges:
                 self.db.execute("INSERT INTO relations VALUES (?,?)", (eid, canonical(r)))
                 edges_added += 1
+            elif r != existing_edges[eid]:
+                self.db.execute("UPDATE relations SET payload=? WHERE id=?", (canonical(r), eid))
         return {"addedRevisions": added, "addedRelations": edges_added, "conflicts": len(self.graph()["conflicts"])}
 
     def restore(self, bundle, password):

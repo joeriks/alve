@@ -252,6 +252,10 @@ class Handler(BaseHTTPRequestHandler):
             return vault.mutate(lambda: vault.add_relation(data))
         if method == "POST" and path == "/api/relations/batch":
             return vault.mutate(lambda: vault.add_relations_batch(data))
+        if method == "DELETE" and len(parts) == 3 and parts[:2] == ["api", "relations"]:
+            return vault.mutate(lambda: vault.delete_relation(parts[2]))
+        if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "relations"] and parts[3] == "restore":
+            return vault.mutate(lambda: vault.restore_relation(parts[2]))
         if method == "POST" and path == "/api/nodes/group":
             return vault.mutate(lambda: vault.group_nodes(data))
         if method == "POST" and path == "/api/connections":

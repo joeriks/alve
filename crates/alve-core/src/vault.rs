@@ -244,7 +244,7 @@ impl Vault {
             })
             .collect::<Vec<_>>();
         Ok(
-            json!({"vaultId":self.id()?,"nodes":heads.values().filter_map(|x|x.first()).collect::<Vec<_>>(),"relations":self.rows("relations")?,"conflicts":conflicts,"proposals":self.rows("proposals")?,"connections":connections}),
+            json!({"vaultId":self.id()?,"nodes":heads.values().filter_map(|x|x.first()).collect::<Vec<_>>(),"relations":self.rows("relations")?.into_iter().filter(|r| r["deleted"] != true).collect::<Vec<_>>(),"conflicts":conflicts,"proposals":self.rows("proposals")?,"connections":connections}),
         )
     }
     pub fn auth(
@@ -388,21 +388,38 @@ impl Vault {
         Ok(node)
     }
     pub fn add_relation(&mut self, data: &Value) -> Result<Value> {
-        let count: i64 = self
-            .require()?
-            .query_row("SELECT count(*) FROM relations", [], |r| r.get(0))?;
-        if count as usize >= MAX_RELATIONS {
-            return Err(Error::new(413, "POC relation limit reached."));
-        }
         let heads = self.heads()?;
         let from = data["fromId"].as_str().unwrap_or("");
         let to = data["toId"].as_str().unwrap_or("");
         if !heads.contains_key(from) || !heads.contains_key(to) {
             return Err(Error::new(400, "Relation endpoints must exist."));
         }
+        if from == to {
+            return Err(Error::new(400, "A relation cannot link a node to itself."));
+        }
+        if [from, to].iter().any(|id| {
+            let current = &heads[*id];
+            current.len() != 1 || current[0]["status"] != "active"
+        }) {
+            return Err(Error::new(
+                409,
+                "A node is inactive or has conflicting versions.",
+            ));
+        }
         let typ = data["type"].as_str().unwrap_or("");
         if !RELATIONS.contains(&typ) {
             return Err(Error::new(400, "Unsupported relation type."));
+        }
+        if let Some(existing) = self.rows("relations")?.into_iter().find(|r| {
+            r["deleted"] != true && r["fromId"] == from && r["toId"] == to && r["type"] == typ
+        }) {
+            return Ok(existing);
+        }
+        let count: i64 = self
+            .require()?
+            .query_row("SELECT count(*) FROM relations", [], |r| r.get(0))?;
+        if count as usize >= MAX_RELATIONS {
+            return Err(Error::new(413, "POC relation limit reached."));
         }
         let relation = json!({"id":Uuid::new_v4().simple().to_string(),"fromId":from,"toId":to,"type":typ,"vaultId":self.id()?,"origin":"user","verification":"user_confirmed","createdAt":now()});
         self.require()?.execute(
@@ -410,6 +427,41 @@ impl Vault {
             params![relation["id"].as_str(), canonical(&relation)],
         )?;
         Ok(relation)
+    }
+    pub fn delete_relation(&mut self, id: &str) -> Result<Value> {
+        let mut relation = self
+            .rows("relations")?
+            .into_iter()
+            .find(|r| r["id"] == id)
+            .ok_or_else(|| Error::new(404, "Relation not found."))?;
+        if relation["deleted"] != true {
+            relation["deleted"] = json!(true);
+            relation["deletedAt"] = json!(now());
+            self.require()?.execute(
+                "UPDATE relations SET payload=? WHERE id=?",
+                params![canonical(&relation), id],
+            )?;
+        }
+        Ok(relation)
+    }
+    pub fn restore_relation(&mut self, id: &str) -> Result<Value> {
+        let records = self.rows("relations")?;
+        let relation = records
+            .iter()
+            .find(|r| r["id"] == id)
+            .ok_or_else(|| Error::new(404, "Relation not found."))?;
+        if relation["deleted"] != true {
+            return Err(Error::new(409, "Only a removed relation can be restored."));
+        }
+        let mut restored = self.add_relation(relation)?;
+        if !records.iter().any(|r| r["id"] == restored["id"]) {
+            restored["restoredFrom"] = json!(id);
+            self.require()?.execute(
+                "UPDATE relations SET payload=? WHERE id=?",
+                params![canonical(&restored), restored["id"].as_str()],
+            )?;
+        }
+        Ok(restored)
     }
     pub fn add_relations_batch(&mut self, data: &Value) -> Result<Value> {
         let object = data
@@ -488,7 +540,9 @@ impl Vault {
         let existing = self
             .rows("relations")?
             .into_iter()
-            .filter(|relation| relation["toId"] == target && relation["type"] == typ)
+            .filter(|relation| {
+                relation["deleted"] != true && relation["toId"] == target && relation["type"] == typ
+            })
             .filter_map(|relation| relation["fromId"].as_str().map(str::to_owned))
             .collect::<HashSet<_>>();
         let additions = sources
@@ -1140,15 +1194,13 @@ impl Vault {
         for relation in relations {
             validate_relation(relation, &vault_id, &node_ids)?;
             let id = relation["id"].as_str().unwrap().to_owned();
-            if let Some(existing) = existing_edges.get(&id).or(additions.get(&id)) {
-                if existing != relation {
-                    return Err(Error::new(
-                        409,
-                        "A relation ID was reused with different content.",
-                    ));
-                }
-            }
-            additions.insert(id, relation.clone());
+            // Check accumulated incoming state first: repeated IDs must not bypass validation.
+            let merged = if let Some(existing) = additions.get(&id).or(existing_edges.get(&id)) {
+                merge_relation(existing, relation)?
+            } else {
+                relation.clone()
+            };
+            additions.insert(id, merged);
         }
         if existing_edges.len()
             + additions
@@ -1178,6 +1230,11 @@ impl Vault {
                     params![id, canonical(&relation)],
                 )?;
                 added_relations += 1;
+            } else if existing_edges.get(&id) != Some(&relation) {
+                db.execute(
+                    "UPDATE relations SET payload=? WHERE id=?",
+                    params![canonical(&relation), id],
+                )?;
             }
         }
         Ok(
@@ -1359,5 +1416,41 @@ fn validate_relation(r: &Value, vault_id: &str, nodes: &HashSet<&str>) -> Result
     {
         return Err(Error::new(400, "Invalid relation provenance."));
     }
+    // Legacy active records omit both fields. A deletion is irreversible for this ID.
+    if r.get("deleted").is_some() || r.get("deletedAt").is_some() {
+        if r["deleted"] != true {
+            return Err(Error::new(400, "Invalid relation tombstone."));
+        }
+        let timestamp = text(r.get("deletedAt"), "relation deletion timestamp", 80, true)?;
+        if chrono::DateTime::parse_from_rfc3339(&timestamp).is_err() {
+            return Err(Error::new(400, "Invalid relation deletion timestamp."));
+        }
+    }
+    if r.get("restoredFrom").is_some() {
+        text(r.get("restoredFrom"), "restored relation ID", 64, true)?;
+    }
     Ok(())
+}
+
+fn merge_relation(existing: &Value, incoming: &Value) -> Result<Value> {
+    let base = |value: &Value| {
+        let mut value = value.clone();
+        let object = value.as_object_mut().unwrap();
+        object.remove("deleted");
+        object.remove("deletedAt");
+        value
+    };
+    if base(existing) != base(incoming) {
+        return Err(Error::new(
+            409,
+            "A relation ID was reused with different content.",
+        ));
+    }
+    // Lexical minimum is deterministic across runtimes, time zones, and merge order.
+    Ok([existing, incoming]
+        .into_iter()
+        .filter(|r| r["deleted"] == true)
+        .min_by(|a, b| a["deletedAt"].as_str().cmp(&b["deletedAt"].as_str()))
+        .unwrap_or(incoming)
+        .clone())
 }

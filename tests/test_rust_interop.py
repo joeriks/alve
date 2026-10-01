@@ -49,6 +49,38 @@ class RustInterop(unittest.TestCase):
             p.stderr.close()
         self.temp.cleanup()
 
+    def test_relation_tombstones_and_undo_cross_runtime(self):
+        a = self.owner('POST', '/api/nodes', {'title': 'Source'})
+        b = self.owner('POST', '/api/nodes', {'title': 'Target'})
+        edge = self.owner('POST', '/api/relations', {'fromId': a['id'], 'toId': b['id'], 'type': 'related_to'})
+        old = self.owner('POST', '/api/bundle')['bundle']
+        self.owner('POST', '/api/lock')
+        v = Vault(self.directory / 'rust/memory.alve')
+        try:
+            v.unlock(PASSWORD)
+            v.mutate(lambda: v.delete_relation(edge['id']))
+            deleted = v.bundle()['bundle']
+            restored = v.mutate(lambda: v.restore_relation(edge['id']))
+            restored_bundle = v.bundle()['bundle']
+        finally:
+            v.lock()
+        self.token = self.call(self.p, 'POST', '/api/unlock', {'password': PASSWORD})['token']
+        # The shared snapshot already contains Undo; merging removal retains the new link.
+        self.owner('POST', '/api/import', {'bundle': deleted, 'password': PASSWORD})
+        self.owner('POST', '/api/import', {'bundle': old, 'password': PASSWORD})
+        self.assertEqual([r['id'] for r in self.owner('GET', '/api/graph')['relations']], [restored['id']])
+        self.owner('POST', '/api/import', {'bundle': restored_bundle, 'password': PASSWORD})
+        self.owner('DELETE', '/api/relations/' + restored['id'])
+        self.assertEqual(self.owner('GET', '/api/graph')['relations'], [])
+        self.owner('POST', '/api/lock')
+        try:
+            v.unlock(PASSWORD)
+            v.mutate(lambda: v.merge(restored_bundle, PASSWORD))
+            self.assertEqual(v.graph()['relations'], [])
+            self.assertEqual(len(v.rows('relations')), 2)
+        finally:
+            v.lock()
+
     def test_snapshot_round_trip_and_typed_values(self):
         facts = [{'key': 'cost', 'label': 'Cost', 'value': {'type': 'money', 'amount': '1200.50', 'currency': 'SEK'}},
                  {'key': 'flag', 'label': 'Flag', 'value': {'type': 'boolean', 'value': False}},
