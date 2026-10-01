@@ -114,6 +114,13 @@ impl Engine {
             ("POST", "/api/connections") => self.vault.mutate(|v| v.grant(data)),
             ("POST", "/api/proposals/review-batch") => self.vault.mutate(|v| v.review_batch(data)),
             _ => {
+                if method == "POST"
+                    && parts.len() == 4
+                    && parts[..2] == ["api", "relations"]
+                    && parts[3] == "replace"
+                {
+                    return self.vault.mutate(|v| v.replace_relation(parts[2], data));
+                }
                 if method == "DELETE" && parts.len() == 3 && parts[..2] == ["api", "relations"] {
                     return self.vault.mutate(|v| v.delete_relation(parts[2]));
                 }

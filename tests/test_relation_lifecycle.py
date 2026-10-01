@@ -31,6 +31,27 @@ class RelationLifecycleTests(unittest.TestCase):
         self.vault.lock()
         self.temp.cleanup()
 
+    def test_replace_is_atomic_and_old_bundle_cannot_resurrect_original(self):
+        request = {**self.request, "type": "belongs_to", "expectedRelation": self.relation}
+        before = self.vault.rows("relations")
+        with self.assertRaises(Problem):
+            self.vault.mutate(lambda: self.vault.replace_relation(self.relation["id"], {**request, "toId": self.nodes[0]["id"]}))
+        self.assertEqual(before, self.vault.rows("relations"))
+        with self.assertRaises(Problem):
+            self.vault.mutate(lambda: self.vault.replace_relation(self.relation["id"], {**request, "expectedRelation": {}}))
+        self.assertEqual(before, self.vault.rows("relations"))
+        with patch.object(self.vault, "persist", side_effect=OSError("synthetic disk failure")):
+            with self.assertRaises(OSError):
+                self.vault.mutate(lambda: self.vault.replace_relation(self.relation["id"], request))
+        self.assertEqual(before, self.vault.rows("relations"))
+        replacement = self.vault.mutate(lambda: self.vault.replace_relation(self.relation["id"], request))
+        self.assertNotEqual(replacement["id"], self.relation["id"])
+        self.vault.mutate(lambda: self.vault.merge(self.old, PASSWORD))
+        self.assertEqual(self.vault.graph()["relations"], [replacement])
+        self.vault.lock()
+        self.vault.unlock(PASSWORD)
+        self.assertEqual(self.vault.graph()["relations"], [replacement])
+
     def encoded(self, payload):
         return base64.b64encode(envelope(BUNDLE, self.vault.vault_id, self.vault.salt,
                                         self.vault.key, canonical(payload).encode())).decode()
@@ -146,6 +167,7 @@ class RelationLifecycleTests(unittest.TestCase):
                 return error.code, json.load(error)
         path = f"/api/relations/{self.relation['id']}"
         try:
+            self.assertEqual(request("POST", path + "/replace", connection["token"])[0], 403)
             self.assertEqual(request("DELETE", path, connection["token"])[0], 403)
             self.assertEqual(request("DELETE", path, self.owner)[0], 200)
             status, body = request("GET", f"/api/ai/nodes/{self.nodes[0]['id']}/relations", connection["token"])

@@ -14,6 +14,8 @@ The Android preview reuses the Rust core and supports explicit local backups and
 
 ## Run the native desktop app
 
+The interactive [memory graph](docs/graph.md) supports neighborhood exploration, view-only hiding, filters, multiple selection and grouping, and memory/relation editing directly on the map.
+
 Download the Windows x64 or ARM64 installer from [GitHub Releases](https://github.com/joeriks/alve/releases/latest). The installer includes the native MCP companion. In the desktop app, choose **Help → Check for updates…** to check manually, then **Install update and restart** to install a newer signed release. Checking requires an internet connection; local memory use does not. See [release and update operation](docs/releases.md).
 
 Building requires Node.js, Rust, and the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/). On Windows, install the MSVC C++ build tools and WebView2. The compiled app and native MCP companion do not require Python, Node.js, or Cargo at runtime.

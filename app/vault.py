@@ -395,6 +395,18 @@ class Vault:
             self.db.execute("UPDATE relations SET payload=? WHERE id=?", (canonical(relation), relation_id))
         return relation
 
+    def replace_relation(self, relation_id, data):
+        current = next((r for r in self.rows("relations") if r["id"] == relation_id), None)
+        if current is None:
+            raise Problem("Relation not found.", 404)
+        if current.get("deleted") or data.get("expectedRelation") != current:
+            raise Problem("The relation changed. Refresh before editing.", 409)
+        if all(data.get(key) == current[key] for key in ("fromId", "toId", "type")):
+            return current
+        replacement = self.add_relation(data)
+        self.delete_relation(relation_id)
+        return replacement
+
     def restore_relation(self, relation_id):
         records = self.rows("relations")
         relation = next((r for r in records if r["id"] == relation_id), None)

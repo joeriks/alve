@@ -444,6 +444,28 @@ impl Vault {
         }
         Ok(relation)
     }
+    pub fn replace_relation(&mut self, id: &str, data: &Value) -> Result<Value> {
+        let current = self
+            .rows("relations")?
+            .into_iter()
+            .find(|r| r["id"] == id)
+            .ok_or_else(|| Error::new(404, "Relation not found."))?;
+        if current["deleted"] == true || data["expectedRelation"] != current {
+            return Err(Error::new(
+                409,
+                "The relation changed. Refresh before editing.",
+            ));
+        }
+        if ["fromId", "toId", "type"]
+            .iter()
+            .all(|key| data[*key] == current[*key])
+        {
+            return Ok(current);
+        }
+        let replacement = self.add_relation(data)?;
+        self.delete_relation(id)?;
+        Ok(replacement)
+    }
     pub fn restore_relation(&mut self, id: &str) -> Result<Value> {
         let records = self.rows("relations")?;
         let relation = records

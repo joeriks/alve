@@ -54,6 +54,34 @@ fn encoded(payload: &Value) -> String {
 }
 
 #[test]
+fn replacement_is_atomic_and_preserves_immutable_relation_history() {
+    let (_dir, mut engine, owner, source, target, relation) = fixture();
+    let old = bundle(&engine.vault);
+    let path = format!(
+        "/api/relations/{}/replace",
+        relation["id"].as_str().unwrap()
+    );
+    let mut data = json!({"fromId":source["id"],"toId":source["id"],"type":"belongs_to","expectedRelation":relation});
+    assert!(engine.request("POST", &path, &data, &owner).is_err());
+    assert_eq!(
+        engine.vault.graph().unwrap()["relations"],
+        json!([relation])
+    );
+    data["toId"] = target["id"].clone();
+    data["expectedRelation"] = json!({});
+    assert!(engine.request("POST", &path, &data, &owner).is_err());
+    data["expectedRelation"] = relation.clone();
+    let replacement = engine.request("POST", &path, &data, &owner).unwrap();
+    assert_ne!(replacement["id"], relation["id"]);
+    engine.vault.mutate(|v| v.merge(&old, PASSWORD)).unwrap();
+    assert_eq!(
+        engine.vault.graph().unwrap()["relations"],
+        json!([replacement])
+    );
+    assert!(engine.request("POST", &path, &data, &owner).is_err());
+}
+
+#[test]
 fn deletion_wins_both_orders_old_replay_and_undo_survive_reopening() {
     let (dir, mut engine, owner, _source, _target, relation) = fixture();
     let old = bundle(&engine.vault);
@@ -271,6 +299,13 @@ fn relation_lifecycle_routes_require_owner_and_hide_deleted_edges_from_ai() {
     let connection = engine.vault.mutate(|v| v.grant(&json!({"name":"limited","nodeIds":[source["id"],target["id"]],"permissions":["read"]}))).unwrap();
     let token = connection["token"].as_str().unwrap();
     let path = format!("/api/relations/{}", relation["id"].as_str().unwrap());
+    assert_eq!(
+        engine
+            .request("POST", &format!("{path}/replace"), &json!({}), token)
+            .unwrap_err()
+            .status,
+        403
+    );
     assert_eq!(
         engine
             .request("DELETE", &path, &json!({}), token)
