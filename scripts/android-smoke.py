@@ -60,9 +60,11 @@ def wait(expression, seconds=30):
         if evaluate(expression):
             return
         time.sleep(.4)
-    raise AssertionError(f'Condition did not become true: {expression}')
+    details = evaluate("JSON.stringify({gateError:document.querySelector('#gate-error')?.textContent,gateTitle:document.querySelector('#gate-title')?.textContent,create:document.querySelector('#unlock-form')?.dataset.create})")
+    raise AssertionError(f'Condition did not become true: {expression}; {details}')
 
 def unlock():
+    wait("['true','false'].includes(document.querySelector('#unlock-form')?.dataset.create)")
     evaluate(f"document.querySelector('#password').value={json.dumps(PASSWORD)};document.querySelector('#unlock-form').requestSubmit();true")
     wait("document.querySelector('#gate').classList.contains('hidden')")
 
