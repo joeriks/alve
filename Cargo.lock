@@ -69,7 +69,7 @@ dependencies = [
 
 [[package]]
 name = "alve"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "alve-core",
  "axum",
