@@ -15,7 +15,7 @@ use std::{
     io::Read,
     net::Ipv4Addr,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -359,27 +359,95 @@ pub async fn sync_pull(
     let generation = state.generation.load(Ordering::SeqCst);
     let engine = engine.inner().clone();
     let installing = updates.installing.clone();
-    tauri::async_runtime::spawn_blocking(move|| -> Result<Value,String> {
-        let client=reqwest::blocking::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(20)).build().map_err(|_|"Could not initialize the transfer client.")?;
-        let response=client.get(url.clone()).header("X-Alve-Sync","1").bearer_auth(&code).send().map_err(|_|"Cannot reach the offering device. Keep both apps open and check Wi-Fi and firewall settings.")?;
-        if response.status()!=reqwest::StatusCode::OK {return Err("Transfer rejected or already used. Create a new link.".into());}
-        if response.content_length().is_some_and(|size|size>MAX_RESPONSE as u64) {return Err("Transfer is too large.".into());}
-        let mut data=Vec::new();response.take(MAX_RESPONSE as u64+1).read_to_end(&mut data).map_err(|_|"Could not read the transfer.")?;
-        if data.len()>MAX_RESPONSE {return Err("Transfer is too large.".into());}
-        let data:Value=serde_json::from_slice(&data).map_err(|_|"Invalid transfer response.")?;
-        let encrypted=data.get("bundle").and_then(Value::as_str).ok_or("Invalid encrypted bundle.")?;
-        let summary={
-            let mut e=engine.lock().map_err(|_|"Local vault is busy.")?;
-            e.vault.auth(&token,true,None,None).map_err(|e|e.message)?;
-            if generation!=state.generation.load(Ordering::SeqCst) || installing.load(Ordering::SeqCst) {return Err("Transfer canceled before import.".into());}
-            #[cfg(target_os="android")]
-            if !crate::mobile::is_foreground() {return Err("Transfer canceled while Alve was in the background.".into());}
-            e.request("POST","/api/import",&json!({"bundle":encrypted,"password":password}),&token).map_err(|e|e.message)?
-        };
-        let mut receipt_url=url;receipt_url.set_path("/receipt");
-        let receipt=client.post(receipt_url).header("X-Alve-Sync","1").header("Content-Type","application/json").bearer_auth(code).body("{\"merged\":true}").send().map(|r|r.status()==reqwest::StatusCode::OK).unwrap_or(false);
-        Ok(json!({"merged":true,"receiptSent":receipt,"summary":summary}))
-    }).await.map_err(|_|"Transfer operation failed.")?
+    tauri::async_runtime::spawn_blocking(move || {
+        receive_and_merge(
+            &engine,
+            &state,
+            generation,
+            &installing,
+            url,
+            &code,
+            &password,
+            &token,
+        )
+    })
+    .await
+    .map_err(|_| "Transfer operation failed.")?
+}
+
+fn receive_and_merge(
+    engine: &SharedEngine,
+    state: &SyncState,
+    generation: u64,
+    installing: &AtomicBool,
+    url: url::Url,
+    code: &str,
+    password: &str,
+    token: &str,
+) -> Result<Value, String> {
+    let client = reqwest::blocking::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|_| "Could not initialize the transfer client.")?;
+    let response=client.get(url.clone()).header("X-Alve-Sync","1").bearer_auth(code).send().map_err(|_|"Cannot reach the offering device. Keep both apps open and check Wi-Fi and firewall settings.")?;
+    if response.status() != reqwest::StatusCode::OK {
+        return Err("Transfer rejected or already used. Create a new link.".into());
+    }
+    if response
+        .content_length()
+        .is_some_and(|size| size > MAX_RESPONSE as u64)
+    {
+        return Err("Transfer is too large.".into());
+    }
+    let mut data = Vec::new();
+    response
+        .take(MAX_RESPONSE as u64 + 1)
+        .read_to_end(&mut data)
+        .map_err(|_| "Could not read the transfer.")?;
+    if data.len() > MAX_RESPONSE {
+        return Err("Transfer is too large.".into());
+    }
+    let data: Value = serde_json::from_slice(&data).map_err(|_| "Invalid transfer response.")?;
+    let encrypted = data
+        .get("bundle")
+        .and_then(Value::as_str)
+        .ok_or("Invalid encrypted bundle.")?;
+    let summary = {
+        let mut e = engine.lock().map_err(|_| "Local vault is busy.")?;
+        e.vault
+            .auth(token, true, None, None)
+            .map_err(|e| e.message)?;
+        if generation != state.generation.load(Ordering::SeqCst)
+            || installing.load(Ordering::SeqCst)
+        {
+            return Err("Transfer canceled before import.".into());
+        }
+        #[cfg(target_os = "android")]
+        if !crate::mobile::is_foreground() {
+            return Err("Transfer canceled while Alve was in the background.".into());
+        }
+        e.request(
+            "POST",
+            "/api/import",
+            &json!({"bundle":encrypted,"password":password}),
+            token,
+        )
+        .map_err(|e| e.message)?
+    };
+    let mut receipt_url = url;
+    receipt_url.set_path("/receipt");
+    let receipt = client
+        .post(receipt_url)
+        .header("X-Alve-Sync", "1")
+        .header("Content-Type", "application/json")
+        .bearer_auth(code)
+        .body("{\"merged\":true}")
+        .send()
+        .map(|r| r.status() == reqwest::StatusCode::OK)
+        .unwrap_or(false);
+    Ok(json!({"merged":true,"receiptSent":receipt,"summary":summary}))
 }
 
 #[cfg(test)]
@@ -387,6 +455,143 @@ mod tests {
     use super::*;
     use alve_core::api::Engine;
     use tempfile::TempDir;
+
+    #[test]
+    fn real_http_transfer_preserves_deletions_and_failed_imports_are_atomic() {
+        let password = "Synthetic wire transfer passphrase";
+        let source_dir = TempDir::new().unwrap();
+        let receiver_dir = TempDir::new().unwrap();
+        let mut sender = Engine::new(source_dir.path().join("vault.alve")).unwrap();
+        let owner = sender.vault.unlock(password, true).unwrap()["token"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let a = sender
+            .vault
+            .mutate(|v| v.add_node(&json!({"title":"first"}), None, None, "user"))
+            .unwrap();
+        let b = sender
+            .vault
+            .mutate(|v| v.add_node(&json!({"title":"second"}), None, None, "user"))
+            .unwrap();
+        let edge = sender
+            .vault
+            .mutate(|v| {
+                v.add_relation(&json!({"fromId":a["id"],"toId":b["id"],"type":"related_to"}))
+            })
+            .unwrap();
+        sender
+            .vault
+            .mutate(|v| {
+                v.grant(&json!({"name":"local only","nodeIds":[a["id"]],"permissions":["read"]}))
+            })
+            .unwrap();
+        let old = sender.vault.bundle().unwrap()["bundle"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let mut receiver = Engine::new(receiver_dir.path().join("vault.alve")).unwrap();
+        receiver.vault.restore(&old, password).unwrap();
+        let token = receiver.vault.unlock(password, false).unwrap()["token"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        sender
+            .vault
+            .mutate(|v| v.delete_relation(edge["id"].as_str().unwrap()))
+            .unwrap();
+        let fresh = sender.vault.bundle().unwrap()["bundle"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let receiver = Arc::new(Mutex::new(receiver));
+        let sender = Arc::new(Mutex::new(sender));
+        let sending = SyncState::default();
+        let receiving = SyncState::default();
+        let code = "a".repeat(64);
+        let offer = |payload: String| {
+            *sending.offer.lock().unwrap() = Some(Offer {
+                code: code.clone(),
+                link: String::new(),
+                bundle: Some(payload),
+                expires: Instant::now() + LIFETIME,
+                fetched: false,
+                reported: false,
+                shutdown: None,
+            });
+        };
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            // Only the test helper bypasses the command's RFC1918 URL parser;
+            // loopback makes this real socket test independent of LAN hardware.
+            let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .unwrap();
+            let host = listener.local_addr().unwrap().to_string();
+            let transport = Transport {
+                state: sending.clone(),
+                engine: sender.clone(),
+                owner,
+                host: host.clone(),
+                generation: 0,
+            };
+            let router = Router::new()
+                .route("/bundle", get(bundle))
+                .route("/receipt", post(receipt))
+                .layer(DefaultBodyLimit::max(128))
+                .with_state(transport);
+            let server = tokio::spawn(async move {
+                let _ = axum::serve(listener, router).await;
+            });
+            let url = url::Url::parse(&format!("http://{host}/bundle")).unwrap();
+            let pull = |pass: String, generation: u64| {
+                let engine = receiver.clone();
+                let state = receiving.clone();
+                let code = code.clone();
+                let token = token.clone();
+                let url = url.clone();
+                tokio::task::spawn_blocking(move || {
+                    receive_and_merge(
+                        &engine,
+                        &state,
+                        generation,
+                        &AtomicBool::new(false),
+                        url,
+                        &code,
+                        &pass,
+                        &token,
+                    )
+                })
+            };
+            offer(fresh.clone());
+            let result = pull(password.into(), 0).await.unwrap().unwrap();
+            assert_eq!(result["receiptSent"], true);
+            let graph = receiver.lock().unwrap().vault.graph().unwrap();
+            assert_eq!(graph["relations"], json!([]));
+            assert_eq!(graph["connections"], json!([]));
+            assert_eq!(sending.status()["peerReportedMerged"], true);
+            offer(old.clone());
+            pull(password.into(), 0).await.unwrap().unwrap();
+            assert_eq!(
+                receiver.lock().unwrap().vault.graph().unwrap()["relations"],
+                json!([])
+            );
+            let before = receiver.lock().unwrap().vault.export().unwrap();
+            offer(fresh.clone());
+            assert!(pull("wrong password".into(), 0).await.unwrap().is_err());
+            assert_eq!(receiver.lock().unwrap().vault.export().unwrap(), before);
+            assert_eq!(sending.status()["peerReportedMerged"], false);
+            offer("not an encrypted bundle".into());
+            assert!(pull(password.into(), 0).await.unwrap().is_err());
+            assert_eq!(receiver.lock().unwrap().vault.export().unwrap(), before);
+            receiving.cancel_all();
+            offer(fresh);
+            assert!(pull(password.into(), 0).await.unwrap().is_err());
+            assert_eq!(receiver.lock().unwrap().vault.export().unwrap(), before);
+            assert_eq!(sending.status()["peerReportedMerged"], false);
+            server.abort();
+        });
+    }
 
     #[test]
     fn links_reject_public_hosts_credentials_ambiguous_paths_and_missing_codes() {

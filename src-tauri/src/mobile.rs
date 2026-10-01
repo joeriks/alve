@@ -81,7 +81,7 @@ pub fn write_saf_uri(window: &WebviewWindow, uri: &url::Url, bytes: Vec<u8>) -> 
     let (sent, received) = mpsc::channel();
     window
         .with_webview(move |webview| {
-            webview.jni_handle().exec(|env, _, webview| {
+            webview.jni_handle().exec(move |env, _, webview| {
                 let result = (|| -> jni::errors::Result<()> {
                     let context = env
                         .call_method(webview, "getContext", "()Landroid/content/Context;", &[])?

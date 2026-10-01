@@ -38,6 +38,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: android
+          cache-on-failure: true
       - run: npm ci
       - run: npm run check
       - run: npm run test:agents

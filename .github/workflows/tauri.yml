@@ -91,7 +91,7 @@ jobs:
           if-no-files-found: error
 
       - uses: actions/cache/save@v4
-        if: always() && steps.native-cache.outputs.cache-hit != 'true'
+        if: ${{ !cancelled() && steps.native-cache.outputs.cache-hit != 'true' }}
         with:
           path: |
             ~/.cargo/registry
