@@ -46,21 +46,13 @@ jobs:
         run: |
           npm run tauri -- android init --ci --skip-targets-install
           node scripts/prepare-android.mjs
-      - name: Build release APK
-        run: npm run tauri -- android build --ci --apk --target aarch64
-      - name: Collect install and signing artifacts
-        run: |
-          mkdir -p android-artifacts
-          find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -exec cp '{}' android-artifacts/ \;
-          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" android-artifacts/apksigner.jar
-          cp src-tauri/gen/android/app/build/outputs/apk/*/release/output-metadata.json android-artifacts/ 2>/dev/null || true
-      - uses: actions/upload-artifact@v4
-        with:
-          name: alve-android-release
-          path: android-artifacts/*
-          if-no-files-found: error
       - name: Build emulator APK
         run: npm run tauri -- android build --ci --debug --apk --target x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alve-android-emulator
+          path: src-tauri/gen/android/app/build/outputs/apk/**/debug/*.apk
+          if-no-files-found: error
       - run: python -m pip install websocket-client
       - name: Enable emulator acceleration
         run: |
@@ -80,3 +72,16 @@ jobs:
         with:
           name: alve-android-acceptance
           path: android-test-results/*
+      - name: Build release APK
+        run: npm run tauri -- android build --ci --apk --target aarch64
+      - name: Collect install and signing artifacts
+        run: |
+          mkdir -p android-artifacts
+          find src-tauri/gen/android/app/build/outputs/apk -path '*/release/*.apk' -exec cp '{}' android-artifacts/ \;
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" android-artifacts/apksigner.jar
+          cp src-tauri/gen/android/app/build/outputs/apk/*/release/output-metadata.json android-artifacts/ 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alve-android-release
+          path: android-artifacts/*
+          if-no-files-found: error
