@@ -1,7 +1,7 @@
 {
   "name": "alve",
   "private": true,
-  "version": "0.3.4",
+  "version": "0.3.5",
   "scripts": {
     "check": "node --check app/static/app.js && node --check app/static/updates.js && node --check app/static/agents.js",
     "test:agents": "node --test tests/test_agents.js",
