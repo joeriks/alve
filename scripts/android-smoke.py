@@ -1,10 +1,12 @@
 """Exercise the real Android WebView/native bridge with synthetic data only."""
 import glob
+import base64
 import json
 import re
 import subprocess
 import time
 import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
 import websocket
 
@@ -64,6 +66,20 @@ def unlock():
     evaluate(f"document.querySelector('#password').value={json.dumps(PASSWORD)};document.querySelector('#unlock-form').requestSubmit();true")
     wait("document.querySelector('#gate').classList.contains('hidden')")
 
+def save_document():
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        adb('shell', 'uiautomator', 'dump', '/sdcard/alve-picker.xml')
+        tree = ET.fromstring(adb('shell', 'cat', '/sdcard/alve-picker.xml'))
+        for node in tree.iter('node'):
+            if node.get('text', '').lower() == 'save' and node.get('enabled') == 'true':
+                bounds = list(map(int, re.findall(r'\d+', node.get('bounds', ''))))
+                if len(bounds) == 4:
+                    adb('shell', 'input', 'tap', str((bounds[0]+bounds[2])//2), str((bounds[1]+bounds[3])//2))
+                    return
+        time.sleep(.3)
+    raise AssertionError('Android document picker Save button missing')
+
 try:
     wait("Boolean(window.__TAURI__?.core?.invoke)")
     info = evaluate("window.__TAURI__.core.invoke('platform_info')")
@@ -85,6 +101,25 @@ try:
     assert not evaluate("Array.from(document.querySelectorAll('[data-native-update]')).some(x=>!x.hidden&&!x.classList.contains('hidden'))"), 'Desktop updater shown on Android'
     package = adb('shell', 'dumpsys', 'package', APP)
     assert 'ALLOW_BACKUP' not in package, 'Android automatic backup enabled'
+    # Use the actual export button and SAF picker, then compare saved bytes with
+    # the encrypted payload passed through the native bridge.
+    evaluate("window.exportOutcome=null;window.originalInvoke=window.__TAURI__.core.invoke;window.__TAURI__.core.invoke=(command,args)=>{const result=window.originalInvoke(command,args);if(command==='save_export'){window.exportArgs=args;result.then(value=>window.exportOutcome={value},error=>window.exportOutcome={error:String(error)});}return result;};document.querySelector('#nav [data-view=backup]').click();true")
+    evaluate("Array.from(document.querySelectorAll('#content button')).find(x=>x.textContent==='Export encrypted .alve bundle').click();true")
+    save_document()
+    wait("window.exportOutcome!==null")
+    assert evaluate('window.exportOutcome') == {'value': True}, evaluate('window.exportOutcome')
+    args = evaluate('window.exportArgs')
+    adb('shell', 'mkdir', '-p', '/sdcard/Documents', '/sdcard/Download')
+    paths = adb('shell', 'find', '/sdcard/Download', '/sdcard/Documents', '-name', args['suggestedName']).splitlines()
+    assert paths, 'Saved Android backup document missing'
+    actual = subprocess.check_output(['adb', 'exec-out', 'cat', paths[0]])
+    assert actual == base64.b64decode(args['content']), 'Android exported backup bytes changed'
+    evaluate("window.exportOutcome=null;Array.from(document.querySelectorAll('#content button')).find(x=>x.textContent==='Export encrypted .alve bundle').click();true")
+    time.sleep(1)
+    adb('shell', 'input', 'keyevent', '4')
+    wait("window.exportOutcome!==null")
+    assert evaluate('window.exportOutcome') == {'value': False}, 'Picker cancellation reported success'
+    assert evaluate("document.querySelector('#gate').classList.contains('hidden')"), 'Quick picker cancellation locked vault'
     adb('shell', 'am', 'force-stop', APP)
     ws.close()
     adb('shell', 'am', 'start', '-n', f'{APP}/.MainActivity')
@@ -94,7 +129,7 @@ try:
         subprocess.run(['adb','exec-out','screencap','-p'],stdout=image,check=True)
     unlock()
     wait("document.querySelector('#content').textContent.includes('Synthetic Android memory')")
-    (OUT / 'result.txt').write_text('PASS: real Android creation, native save, Back, background lock, reopen, mobile updater exclusion and backup policy.\n')
+    (OUT / 'result.txt').write_text('PASS: real Android creation, native save, Back, background lock, reopen, SAF encrypted export and cancel, mobile updater exclusion and backup policy.\n')
     print('Android acceptance passed.')
 finally:
     (OUT / 'logcat.txt').write_text(adb('logcat','-d','-s','alve','chromium','AndroidRuntime'))
