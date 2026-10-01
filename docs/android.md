@@ -60,3 +60,9 @@ memory. The release APK is signed locally; private signing keys are not uploaded
 to CI. Emulator checks do not establish behavior on every physical phone or Wi-Fi
 hotspot: test export/recovery and two-direction transfer on the actual devices
 before depending on them.
+
+For test-script changes, the manual `Android emulator verification` workflow can
+reuse the `alve-android-emulator` artifact from an earlier run. It refuses to run
+when Rust sources, UI assets, dependencies or native build inputs differ from that
+APK's source commit. This avoids recompiling an unchanged app while refining a
+device test. Distribution APKs still come from the normal Android build workflow.
