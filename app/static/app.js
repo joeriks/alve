@@ -68,7 +68,7 @@
     if(state.grouping){const bar=el('div',{class:'selection-bar'},el('strong',{id:'group-selection-count'}),btn('Actions','secondary',()=>{state.selectionPanel=!state.selectionPanel;render()}),btn('Done','secondary',()=>{state.grouping=false;state.selectedMemories.clear();state.groupTitle='';state.selectionPanel=false;render()}));c.append(bar);if(state.selectionPanel)c.append(memoryGrouping());}else c.append(el('div',{class:'list-actions'},btn(state.selectedMemories.size?`Resume selection (${state.selectedMemories.size})`:'Select memories','secondary',()=>{state.grouping=true;render()})));
 
     const list=el('div',{class:'node-list'});
-    if(!show.length)list.append(el('div',{class:'card empty',text:q||state.tag?'No memories match your filters.':'No memories yet. Create the first one from Menu.'}));
+    if(!show.length)list.append(el('div',{class:'card empty',text:q||state.tag||state.groupsOnly||state.archiveFilter!=='active'?'No memories match your filters.':'No memories yet. Create the first one from Menu.'}));
     show.slice(0,state.listLimit).forEach(n=>{
       const row=nodeRow(n);row.dataset.memoryId=n.id;
       if(state.grouping){const unavailable=n.status==='archived'||(state.graph.conflicts||[]).some(cf=>cf.nodeId===n.id||cf.id===n.id);const box=el('input',{type:'checkbox','aria-label':`Select ${n.title}`,disabled:unavailable?'disabled':null});box.checked=state.selectedMemories.has(n.id);box.addEventListener('click',event=>event.stopPropagation());box.addEventListener('keydown',event=>event.stopPropagation());box.addEventListener('change',()=>{toggleMemory(n.id)});row.prepend(box);}
