@@ -29,6 +29,16 @@ The graph links nodes with typed relations, for example a decision `belongs_to` 
 
 ## AI integration
 
+### Vault overview
+
+The application should keep a visible list of its loaded vaults. Each entry identifies the vault by a human-readable name and stable vault ID, indicates locked/unlocked state, and lists its active AI grants. An active grant means permission exists; it does not mean that an AI client is online or that the entire vault is accessible.
+
+For each grant, show two distinct names: the owner-assigned AI connection label (for example, `Local assistant`) and the alias under which that vault is presented to the AI (for example, `personal-memory`). Also show its explicit node scope and search/read/propose permissions, with direct controls to manage or revoke access. Revoked grants belong in a separate history and must never count as active. Names are labels, not verified AI-provider identities or authorization credentials.
+
+The working POC lists the single vault managed by the current instance, plus its real grants. It does not discover other instances or provide a shared multi-vault manager. Existing unnamed grants are shown as unnamed. New grants default their AI-visible vault alias to `memory`; the owner can choose another alias. Scoped API responses identify both the stable vault ID and that connection's alias. Aliases do not broaden permissions or route requests to a different vault.
+
+The future multi-vault manager should use the same presentation for all loaded vaults, keep unlocking and AI permissions independent, and require explicit grants before cross-vault search. Locked vaults must not disclose private connection labels through the unauthenticated API.
+
 The primary integration surface is a local, user-controlled API that lets a selected model read permitted context and submit proposed memories. An optional MCP adapter may expose the same controlled capability to compatible tools. The Alve app may also connect directly to a model chosen by the user.
 
 AI access is scoped by the user and designed around proposals rather than unreviewed writes. Models receive only the information necessary for an interaction. External models are optional and require an explicit user choice; no external provider is a hidden fallback.

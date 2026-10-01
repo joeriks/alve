@@ -1,0 +1,299 @@
+"""Small stdio MCP adapter for the POC's scoped localhost API.
+
+Credentials come from ALVE_TOKEN; no vault passphrase is exposed to an AI client.
+"""
+import json
+import os
+import sys
+from urllib.error import HTTPError
+from urllib.parse import quote, urlencode, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+PROTOCOL = "2025-11-25"
+MAX_LINE = 256 * 1024
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *_args, **_kwargs):
+        return None
+
+
+def api(path, body=None):
+    base = os.environ.get("ALVE_URL", "http://127.0.0.1:4765").rstrip("/")
+    parsed = urlsplit(base)
+    if (parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}
+            or not parsed.port or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment):
+        raise ValueError("ALVE_URL must be an explicit localhost HTTP address with a port.")
+    token = os.environ.get("ALVE_TOKEN", "")
+    if not token:
+        raise ValueError("Set ALVE_TOKEN to a scoped connection token from the Alve UI.")
+    headers = {"Authorization": "Bearer " + token}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    request = Request(base + path, json.dumps(body).encode() if body is not None else None, headers)
+    try:
+        with build_opener(NoRedirect).open(request, timeout=15) as response:
+            return json.load(response)
+    except HTTPError as exc:
+        try:
+            detail = json.loads(exc.read(4096)).get("error")
+            error = detail.strip()[:1000] if isinstance(detail, str) and detail.strip() else "API request denied"
+        except (ValueError, UnicodeDecodeError):
+            error = "API request denied"
+        raise ValueError(f"Alve API {exc.code}: {error}") from None
+
+
+FACT_VALUE = {
+    "type": "object",
+    "properties": {
+        "type": {"type": "string", "enum": ["text", "boolean", "date", "datetime", "money", "quantity"]},
+        "value": {"oneOf": [{"type": "string"}, {"type": "boolean"}]},
+        "timeZone": {"type": "string", "maxLength": 80},
+        # Decimal amounts remain strings so a client cannot silently round money or quantities.
+        "amount": {"type": "string", "maxLength": 80},
+        "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+        "unit": {"type": "string", "maxLength": 40},
+    },
+    "required": ["type"],
+    "additionalProperties": False,
+}
+
+CONTENT = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string", "minLength": 1, "maxLength": 120},
+        "body": {"type": "string", "maxLength": 2000,
+                 "description": "Use at most 300 whitespace-separated words."},
+        "type": {"type": "string", "enum": ["memory", "project", "person", "event", "document"]},
+        "kind": {"type": "string", "enum": ["decision", "preference", "insight", "commitment", "record"]},
+        "tags": {"type": "array", "maxItems": 20, "items": {"type": "string", "minLength": 1, "maxLength": 60}},
+        "facts": {"type": "array", "maxItems": 30, "items": {"type": "object", "properties": {
+            "key": {"type": "string", "minLength": 1, "maxLength": 80},
+            "label": {"type": "string", "minLength": 1, "maxLength": 120},
+            "value": {"oneOf": [FACT_VALUE, {"type": "null"}]},
+            "precision": {"type": "string", "enum": ["exact", "approximate", "estimated"]},
+        }, "required": ["key", "label"], "additionalProperties": False}},
+        "references": {"type": "array", "maxItems": 20, "items": {"type": "object", "properties": {
+            "title": {"type": "string", "minLength": 1, "maxLength": 200},
+            "url": {"type": "string", "maxLength": 2000, "pattern": "^https?://"},
+        }, "required": ["title"], "additionalProperties": False}},
+        "status": {"type": "string", "enum": ["active", "archived"]},
+    },
+    "required": ["title", "type", "kind"],
+    "additionalProperties": False,
+}
+
+PREPARE_INPUT = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["create", "update"], "default": "create"},
+        "nodeId": {"type": "string", "minLength": 1},
+        "expectedRevision": {"type": "string", "minLength": 1},
+        "content": CONTENT,
+    },
+    "required": ["content"],
+    "allOf": [{"if": {"properties": {"action": {"const": "update"}}, "required": ["action"]},
+               "then": {"required": ["nodeId", "expectedRevision"]}}],
+    "additionalProperties": False,
+}
+
+FINAL_CONFIRMATION = {
+    "type": "object",
+    "properties": {
+        "concise": {"const": True},
+        "accurateToSource": {"const": True},
+        "structured": {"const": True},
+        "userConfirmed": {"const": True},
+        "sourceBasis": {"type": "string", "enum": ["user_statement", "reference", "inference", "unknown"]},
+        "basis": {"type": "string", "minLength": 1, "maxLength": 500},
+        "uncertainties": {"type": "string", "maxLength": 1000},
+    },
+    "required": ["concise", "accurateToSource", "structured", "userConfirmed", "sourceBasis", "basis", "uncertainties"],
+    "additionalProperties": False,
+}
+
+SEARCH_INPUT = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string", "maxLength": 1000, "default": ""},
+        "tags": {"type": "array", "maxItems": 20, "items": {"type": "string", "minLength": 1, "maxLength": 60}},
+        "type": {"type": "string", "enum": ["memory", "project", "person", "event", "document"]},
+        "kind": {"type": "string", "enum": ["decision", "preference", "insight", "commitment", "record"]},
+        "updatedSince": {"type": "string", "format": "date-time"},
+        "updatedBefore": {"type": "string", "format": "date-time"},
+        "includeArchived": {"type": "boolean", "default": False},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+        "offset": {"type": "integer", "minimum": 0, "maximum": 5000, "default": 0},
+        "sort": {"type": "string", "enum": ["relevance", "updated"], "default": "relevance"},
+    },
+    "additionalProperties": False,
+}
+
+TOOLS = [
+    {"name": "search_memory", "description": "Search authorized memories by text or structured fields. Tags are ANDed exact case-insensitive matches. Use nextOffset for pagination; results are a live local view and may change after edits or peer sync.",
+     "inputSchema": SEARCH_INPUT},
+    {"name": "read_node", "description": "Read an allowed memory node and any conflicting versions.",
+     "inputSchema": {"type": "object", "properties": {"node_id": {"type": "string"}}, "required": ["node_id"]}},
+    {"name": "get_relations", "description": "Read only relations whose endpoints are both allowed.",
+     "inputSchema": {"type": "object", "properties": {"node_id": {"type": "string"}}, "required": ["node_id"]}},
+    {"name": "prepare_memory", "description": "Check a complete proposed memory and issue a one-time review token. This stores nothing. Show the returned preview to the user and request explicit confirmation before propose_memory.",
+     "inputSchema": PREPARE_INPUT},
+    {"name": "prepare_memory_batch", "description": "Prepare 2 to 50 exact memory previews and an owner-created project group. Show the complete batch preview and request one explicit confirmation.",
+     "inputSchema": {"type": "object", "properties": {"proposals": {"type": "array", "minItems": 2, "maxItems": 50, "items": PREPARE_INPUT}, "groupTitle": {"type": "string", "minLength": 1, "maxLength": 200}}, "required": ["proposals", "groupTitle"], "additionalProperties": False}},
+    {"name": "propose_memory", "description": "Submit a previously prepared proposal for owner review only after explicit human confirmation. Never auto-confirm: attest each check, set userConfirmed true only after confirmation, and use the reviewToken unchanged.",
+     "inputSchema": {"type": "object", "properties": {
+         "reviewToken": {"type": "string", "minLength": 1}, "confirmation": FINAL_CONFIRMATION},
+         "required": ["reviewToken", "confirmation"], "additionalProperties": False}},
+    {"name": "propose_memory_batch", "description": "Submit only a previously prepared batch token and explicit confirmation. This creates pending proposals only; the owner must approve the complete batch.",
+     "inputSchema": {"type": "object", "properties": {"reviewToken": {"type": "string", "minLength": 1}, "confirmation": FINAL_CONFIRMATION}, "required": ["reviewToken", "confirmation"], "additionalProperties": False}},
+]
+
+AGENT_REPORT = {'type':'object','properties':{
+    **{k:{'type':'string','maxLength':300,**({'minLength':1} if k in {'workPerformed','result','nextAction'} else {})} for k in ['workPerformed','result','uncertainties','remaining','nextAction']},
+    'outcome':{'type':'string','enum':['completed','partial','blocked']},
+    'nextFollowUp':{'type':'string','format':'date-time','maxLength':80,'description':'Explicit UTC offset required. This makes the assignment eligible again; it does not schedule an AI.'},
+    'references':CONTENT['properties']['references']},
+    'required':['workPerformed','result','nextAction','outcome','nextFollowUp'],'additionalProperties':False}
+AGENT_TOOLS = [
+    {'name':'list_agent_assignments','description':'Start here when asked what Alve needs done. List authorized agent assignments and follow-up reasons. Requires explicit read and run permissions. Choose a due assignment, then get_agent_briefing. No model or scheduler is started.',
+     'inputSchema':{'type':'object','properties':{'limit':{'type':'integer','minimum':1,'maximum':100,'default':20},'offset':{'type':'integer','minimum':0,'maximum':5000,'default':0}},'additionalProperties':False}},
+    {'name':'get_agent_briefing','description':'Start a device-local one-hour run and obtain the current assignment, authorized context and latest approved handoff. Requires read, run and propose. Use a fresh requestId; reuse it only to retry the same request. Before ending, prepare and submit a report after explicit user confirmation. Fetching this briefing never means work is complete.',
+     'inputSchema':{'type':'object','properties':{k:{'type':'string','minLength':1,'maxLength':100} for k in ['agentId','requestId']},'required':['agentId','requestId'],'additionalProperties':False}},
+    {'name':'get_agent_run','description':'Recover your run status after an interrupted connection or uncertain submission. Pending reports require owner review; expired or abandoned work is never completed.',
+     'inputSchema':{'type':'object','properties':{'runId':{'type':'string','minLength':1,'maxLength':100}},'required':['runId'],'additionalProperties':False}},
+    {'name':'prepare_agent_report','description':'Before ending an agent run, prepare a concise report of work performed, evidence, uncertainties, remaining work, next action and next follow-up. Partial or blocked progress must also be reported. Show the exact returned memory preview and ask for human confirmation; never auto-confirm.',
+     'inputSchema':{'type':'object','properties':{'runId':{'type':'string','minLength':1,'maxLength':100},'report':AGENT_REPORT},'required':['runId','report'],'additionalProperties':False}},
+    {'name':'submit_agent_report','description':'Submit the exact prepared report only after explicit user confirmation using its unchanged token. This records a pending report, not a verified project fact or proof of payment. Alve owner approval is required before it becomes the next handoff.',
+     'inputSchema':{'type':'object','properties':{'reviewToken':{'type':'string','minLength':1},'confirmation':FINAL_CONFIRMATION},'required':['reviewToken','confirmation'],'additionalProperties':False}},
+]
+TOOLS += AGENT_TOOLS
+
+
+def search_query(args):
+    """Translate the MCP search object into the API's repeated query parameters."""
+    allowed = {"query", "tags", "type", "kind", "updatedSince", "updatedBefore", "includeArchived", "limit", "offset", "sort"}
+    unexpected = set(args) - allowed
+    if unexpected:
+        raise ValueError("Unknown search argument.")
+    query = args.get("query", "")
+    if not isinstance(query, str) or len(query) > 1000:
+        raise ValueError("query must be a string of at most 1000 characters")
+    tags = args.get("tags", [])
+    if not isinstance(tags, list) or len(tags) > 20 or any(not isinstance(tag, str) or not tag or len(tag) > 60 for tag in tags):
+        raise ValueError("tags must contain at most 20 nonempty strings of at most 60 characters")
+    include_archived = args.get("includeArchived", False)
+    if type(include_archived) is not bool:
+        raise ValueError("includeArchived must be a boolean")
+    params = {"q": query, "tag": tags, "includeArchived": "true" if include_archived else "false"}
+    for key, values in (("type", {"memory", "project", "person", "event", "document"}),
+                        ("kind", {"decision", "preference", "insight", "commitment", "record"}),
+                        ("sort", {"relevance", "updated"})):
+        value = args.get(key)
+        if value is not None:
+            if not isinstance(value, str) or value not in values:
+                raise ValueError(f"Invalid search {key}")
+            params[key] = value
+    for key in ("updatedSince", "updatedBefore"):
+        value = args.get(key)
+        if value is not None:
+            if not isinstance(value, str):
+                raise ValueError(f"{key} must be an ISO 8601 timestamp")
+            params[key] = value
+    for key, default, minimum, maximum in (("limit", 20, 1, 100), ("offset", 0, 0, 5000)):
+        value = args.get(key, default)
+        if type(value) is not int or not minimum <= value <= maximum:
+            raise ValueError(f"{key} must be an integer between {minimum} and {maximum}")
+        params[key] = value
+    return urlencode(params, doseq=True)
+
+
+def handle(message):
+    if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
+        return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid JSON-RPC request"}}
+    identifier = message.get("id")
+    if "id" not in message:
+        return None
+    method = message.get("method")
+    params = message.get("params", {})
+    if not isinstance(params, dict):
+        return {"jsonrpc": "2.0", "id": identifier, "error": {"code": -32602, "message": "Invalid parameters"}}
+    try:
+        if method == "initialize":
+            result = {"protocolVersion": PROTOCOL, "capabilities": {"tools": {}, "resources": {}},
+                      "serverInfo": {"name": "alve-local-memory-poc", "version": "0.1.0"},
+                      "instructions": "Read alve://usage first. To check what Alve needs done, call list_agent_assignments then get_agent_briefing. Before ending a run, prepare_agent_report, obtain explicit human confirmation, and submit_agent_report. Never auto-confirm. All reports and memory changes require owner approval."}
+        elif method == "ping":
+            result = {}
+        elif method == "tools/list":
+            result = {"tools": TOOLS}
+        elif method == "resources/list":
+            result = {"resources": [{"uri": "alve://usage", "name": "Alve usage contract", "mimeType": "application/json"}]}
+        elif method == "resources/read":
+            if params.get("uri") != "alve://usage":
+                raise ValueError("Unknown resource")
+            result = {"contents": [{"uri": "alve://usage", "mimeType": "application/json", "text": json.dumps(api("/api/ai/contract"))}]}
+        elif method == "tools/call":
+            name, args = params.get("name"), params.get("arguments", {})
+            if not isinstance(args, dict):
+                raise ValueError("Tool arguments must be an object")
+            try:
+                if name == "search_memory":
+                    data = api("/api/ai/search?" + search_query(args))
+                elif name in {"read_node", "get_relations"}:
+                    node_id = args.get("node_id")
+                    if not isinstance(node_id, str) or not node_id:
+                        raise ValueError("node_id is required")
+                    data = api("/api/ai/nodes/" + quote(node_id, safe="") + ("/relations" if name == "get_relations" else ""))
+                elif name == "prepare_memory":
+                    data = api("/api/ai/proposals/prepare", args)
+                elif name == "prepare_memory_batch":
+                    data = api("/api/ai/proposals/prepare-batch", args)
+                elif name == "propose_memory":
+                    data = api("/api/ai/proposals", args)
+                elif name == "propose_memory_batch":
+                    data = api("/api/ai/proposals/submit-batch", args)
+                elif name == 'list_agent_assignments':
+                    if set(args)-{'limit','offset'} or any(type(v) is not int for v in args.values()):
+                        raise ValueError('Use integer limit and offset only.')
+                    data=api('/api/ai/agent-assignments?'+urlencode(args))
+                elif name == 'get_agent_briefing':
+                    data=api('/api/ai/agent-briefing',args)
+                elif name == 'get_agent_run':
+                    if set(args)!={'runId'} or not isinstance(args['runId'],str) or not args['runId']:
+                        raise ValueError('Supply runId only.')
+                    data=api('/api/ai/agent-runs/'+quote(args['runId'],safe=''))
+                elif name == 'prepare_agent_report':
+                    data=api('/api/ai/agent-reports/prepare',args)
+                elif name == 'submit_agent_report':
+                    data=api('/api/ai/agent-reports/submit',args)
+                else:
+                    raise ValueError("Unknown tool")
+                result = {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False)}], "isError": False}
+            except (ValueError, OSError) as exc:
+                result = {"content": [{"type": "text", "text": str(exc)[:1200]}], "isError": True}
+        else:
+            return {"jsonrpc": "2.0", "id": identifier, "error": {"code": -32601, "message": "Method not found"}}
+        return {"jsonrpc": "2.0", "id": identifier, "result": result}
+    except (ValueError, OSError):
+        return {"jsonrpc": "2.0", "id": identifier, "error": {"code": -32602, "message": "Request failed; check local access and parameters"}}
+
+
+def main():
+    while True:
+        line = sys.stdin.buffer.readline(MAX_LINE + 1)
+        if not line:
+            break
+        if len(line) > MAX_LINE:
+            # Terminate rather than interpreting the tail of an oversized request.
+            break
+        try:
+            result = handle(json.loads(line))
+        except (ValueError, UnicodeDecodeError):
+            result = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}
+        if result is not None:
+            sys.stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
+            sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()

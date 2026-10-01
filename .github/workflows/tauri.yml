@@ -1,0 +1,101 @@
+name: Tauri native acceptance
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: tauri-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: rustup update stable --no-self-update
+      - uses: actions/cache/restore@v4
+        id: native-cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: native-${{ runner.os }}-${{ runner.arch }}-
+      - run: npm ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+      - run: cargo test -p alve-core --locked
+      - run: cargo build -p alve-core --bins --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alve-core-${{ matrix.os }}
+          path: target/debug/alve-core-check.exe
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: cargo test -p alve --locked
+      - run: cargo build -p alve-core --bin alve-mcp --release --locked
+      - run: npm run check
+      - run: npm run test:agents
+      - run: npm run build -- --bundles nsis --config src-tauri/tauri.release.conf.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alve-${{ matrix.os }}
+          path: |
+            target/release/bundle/nsis/*-setup.exe
+            target/release/alve.exe
+            target/release/alve-mcp.exe
+            target/debug/alve-core-check.exe
+          if-no-files-found: error
+
+      # Acceptance fixture only: never upload this older-version executable to Releases.
+      - name: Build older updater probe
+        if: matrix.os == 'windows-11-arm'
+        shell: pwsh
+        run: |
+          try {
+            $manifest = Get-Content src-tauri/Cargo.toml -Raw
+            ($manifest -replace '(?m)^version = "[^"]+"', 'version = "0.2.99"') | Set-Content src-tauri/Cargo.toml
+            $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+            $config.version = '0.2.99'
+            $config | ConvertTo-Json -Depth 20 | Set-Content src-tauri/tauri.conf.json
+            npm run build -- --bundles nsis --config src-tauri/tauri.release.conf.json
+            if ($LASTEXITCODE -ne 0) { throw 'Updater probe build failed.' }
+            New-Item -ItemType Directory -Path target/updater-probe -Force | Out-Null
+            Copy-Item target/release/alve.exe target/updater-probe/alve.exe
+            $installer = Get-ChildItem target/release/bundle/nsis -Filter '*_0.2.99_*-setup.exe' -File | Select-Object -First 1
+            if (-not $installer) { throw 'Updater probe installer missing.' }
+            Copy-Item $installer.FullName target/updater-probe/Alve_updater_probe_setup.exe
+          } finally {
+            git restore src-tauri/Cargo.toml src-tauri/tauri.conf.json Cargo.lock
+          }
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'windows-11-arm'
+        with:
+          name: alve-updater-probe-arm64
+          path: target/updater-probe/*
+          if-no-files-found: error
+
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && steps.native-cache.outputs.cache-hit != 'true' }}
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+

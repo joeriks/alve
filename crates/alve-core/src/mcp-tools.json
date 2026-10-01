@@ -1,0 +1,901 @@
+[
+  {
+    "name": "search_memory",
+    "description": "Search authorized memories by text or structured fields. Tags are ANDed exact case-insensitive matches. Use nextOffset for pagination; results are a live local view and may change after edits or peer sync.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "maxLength": 1000,
+          "default": ""
+        },
+        "tags": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "memory",
+            "project",
+            "person",
+            "event",
+            "document"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "decision",
+            "preference",
+            "insight",
+            "commitment",
+            "record"
+          ]
+        },
+        "updatedSince": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedBefore": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "includeArchived": {
+          "type": "boolean",
+          "default": false
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "default": 0
+        },
+        "sort": {
+          "type": "string",
+          "enum": [
+            "relevance",
+            "updated"
+          ],
+          "default": "relevance"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "read_node",
+    "description": "Read an allowed memory node and any conflicting versions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "node_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id"
+      ]
+    }
+  },
+  {
+    "name": "get_relations",
+    "description": "Read only relations whose endpoints are both allowed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "node_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id"
+      ]
+    }
+  },
+  {
+    "name": "prepare_memory",
+    "description": "Check a complete proposed memory and issue a one-time review token. This stores nothing. Show the returned preview to the user and request explicit confirmation before propose_memory.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "update"
+          ],
+          "default": "create"
+        },
+        "nodeId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expectedRevision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "body": {
+              "type": "string",
+              "maxLength": 2000,
+              "description": "Use at most 300 whitespace-separated words."
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "memory",
+                "project",
+                "person",
+                "event",
+                "document"
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "decision",
+                "preference",
+                "insight",
+                "commitment",
+                "record"
+              ]
+            },
+            "tags": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              }
+            },
+            "facts": {
+              "type": "array",
+              "maxItems": 30,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "value": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "text",
+                              "boolean",
+                              "date",
+                              "datetime",
+                              "money",
+                              "quantity"
+                            ]
+                          },
+                          "value": {
+                            "oneOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "boolean"
+                              }
+                            ]
+                          },
+                          "timeZone": {
+                            "type": "string",
+                            "maxLength": 80
+                          },
+                          "amount": {
+                            "type": "string",
+                            "maxLength": 80
+                          },
+                          "currency": {
+                            "type": "string",
+                            "pattern": "^[A-Z]{3}$"
+                          },
+                          "unit": {
+                            "type": "string",
+                            "maxLength": 40
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "precision": {
+                    "type": "string",
+                    "enum": [
+                      "exact",
+                      "approximate",
+                      "estimated"
+                    ]
+                  }
+                },
+                "required": [
+                  "key",
+                  "label"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "references": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "pattern": "^https?://"
+                  }
+                },
+                "required": [
+                  "title"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "active",
+                "archived"
+              ]
+            }
+          },
+          "required": [
+            "title",
+            "type",
+            "kind"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "content"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "update"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "required": [
+              "nodeId",
+              "expectedRevision"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "propose_memory",
+    "description": "Submit a previously prepared proposal for owner review only after explicit human confirmation. Never auto-confirm: attest each check, set userConfirmed true only after confirmation, and use the reviewToken unchanged.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "reviewToken": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confirmation": {
+          "type": "object",
+          "properties": {
+            "concise": {
+              "const": true
+            },
+            "accurateToSource": {
+              "const": true
+            },
+            "structured": {
+              "const": true
+            },
+            "userConfirmed": {
+              "const": true
+            },
+            "sourceBasis": {
+              "type": "string",
+              "enum": [
+                "user_statement",
+                "reference",
+                "inference",
+                "unknown"
+              ]
+            },
+            "basis": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "uncertainties": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "concise",
+            "accurateToSource",
+            "structured",
+            "userConfirmed",
+            "sourceBasis",
+            "basis",
+            "uncertainties"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "reviewToken",
+        "confirmation"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "prepare_memory_batch",
+    "description": "Check 2 to 50 related memory proposals and issue one review token for the exact complete batch. This stores nothing. Show every preview and the planned project group to the user before propose_memory_batch.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "proposals": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "create",
+                  "update"
+                ],
+                "default": "create"
+              },
+              "nodeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "expectedRevision": {
+                "type": "string",
+                "minLength": 1
+              },
+              "content": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "body": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "Use at most 300 whitespace-separated words."
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "memory",
+                      "project",
+                      "person",
+                      "event",
+                      "document"
+                    ]
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "decision",
+                      "preference",
+                      "insight",
+                      "commitment",
+                      "record"
+                    ]
+                  },
+                  "tags": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 60
+                    }
+                  },
+                  "facts": {
+                    "type": "array",
+                    "maxItems": 30,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "value": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "text",
+                                    "boolean",
+                                    "date",
+                                    "datetime",
+                                    "money",
+                                    "quantity"
+                                  ]
+                                },
+                                "value": {
+                                  "oneOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    }
+                                  ]
+                                },
+                                "timeZone": {
+                                  "type": "string",
+                                  "maxLength": 80
+                                },
+                                "amount": {
+                                  "type": "string",
+                                  "maxLength": 80
+                                },
+                                "currency": {
+                                  "type": "string",
+                                  "pattern": "^[A-Z]{3}$"
+                                },
+                                "unit": {
+                                  "type": "string",
+                                  "maxLength": 40
+                                }
+                              },
+                              "required": [
+                                "type"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "precision": {
+                          "type": "string",
+                          "enum": [
+                            "exact",
+                            "approximate",
+                            "estimated"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "label"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "references": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "url": {
+                          "type": "string",
+                          "maxLength": 2000,
+                          "pattern": "^https?://"
+                        }
+                      },
+                      "required": [
+                        "title"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "archived"
+                    ]
+                  }
+                },
+                "required": [
+                  "title",
+                  "type",
+                  "kind"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "content"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "action": {
+                      "const": "update"
+                    }
+                  },
+                  "required": [
+                    "action"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "nodeId",
+                    "expectedRevision"
+                  ]
+                }
+              }
+            ],
+            "additionalProperties": false
+          }
+        },
+        "groupTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "proposals",
+        "groupTitle"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "propose_memory_batch",
+    "description": "Submit the exact prepared batch for owner review after explicit human confirmation. The owner must review all members together; approval creates the previewed project group and belongs_to links.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "reviewToken": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confirmation": {
+          "type": "object",
+          "properties": {
+            "concise": {
+              "const": true
+            },
+            "accurateToSource": {
+              "const": true
+            },
+            "structured": {
+              "const": true
+            },
+            "userConfirmed": {
+              "const": true
+            },
+            "sourceBasis": {
+              "type": "string",
+              "enum": [
+                "user_statement",
+                "reference",
+                "inference",
+                "unknown"
+              ]
+            },
+            "basis": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "uncertainties": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "concise",
+            "accurateToSource",
+            "structured",
+            "userConfirmed",
+            "sourceBasis",
+            "basis",
+            "uncertainties"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "reviewToken",
+        "confirmation"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_agent_assignments",
+    "description": "Start here when asked what Alve needs done. List authorized agent assignments and follow-up reasons. Requires explicit read and run permissions. Choose a due assignment, then get_agent_briefing. No model or scheduler is started.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "default": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_agent_briefing",
+    "description": "Start a device-local one-hour run and obtain the current assignment, authorized context and latest approved handoff. Requires read, run and propose. Use a fresh requestId; reuse it only to retry the same request. Before ending, prepare and submit a report after explicit user confirmation. Fetching this briefing never means work is complete.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": [
+        "agentId",
+        "requestId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_agent_run",
+    "description": "Recover your run status after an interrupted connection or uncertain submission. Pending reports require owner review; expired or abandoned work is never completed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": [
+        "runId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "prepare_agent_report",
+    "description": "Before ending an agent run, prepare a concise report of work performed, evidence, uncertainties, remaining work, next action and next follow-up. Partial or blocked progress must also be reported. Show the exact returned memory preview and ask for human confirmation; never auto-confirm.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "report": {
+          "type": "object",
+          "properties": {
+            "workPerformed": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            },
+            "result": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            },
+            "uncertainties": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "remaining": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "nextAction": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "completed",
+                "partial",
+                "blocked"
+              ]
+            },
+            "nextFollowUp": {
+              "type": "string",
+              "format": "date-time",
+              "maxLength": 80,
+              "description": "Explicit UTC offset required. This makes the assignment eligible again; it does not schedule an AI."
+            },
+            "references": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "pattern": "^https?://"
+                  }
+                },
+                "required": [
+                  "title"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "workPerformed",
+            "result",
+            "nextAction",
+            "outcome",
+            "nextFollowUp"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "runId",
+        "report"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "submit_agent_report",
+    "description": "Submit the exact prepared report only after explicit user confirmation using its unchanged token. This records a pending report, not a verified project fact or proof of payment. Alve owner approval is required before it becomes the next handoff.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "reviewToken": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confirmation": {
+          "type": "object",
+          "properties": {
+            "concise": {
+              "const": true
+            },
+            "accurateToSource": {
+              "const": true
+            },
+            "structured": {
+              "const": true
+            },
+            "userConfirmed": {
+              "const": true
+            },
+            "sourceBasis": {
+              "type": "string",
+              "enum": [
+                "user_statement",
+                "reference",
+                "inference",
+                "unknown"
+              ]
+            },
+            "basis": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "uncertainties": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "concise",
+            "accurateToSource",
+            "structured",
+            "userConfirmed",
+            "sourceBasis",
+            "basis",
+            "uncertainties"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "reviewToken",
+        "confirmation"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

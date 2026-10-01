@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+release/
 .env
 .env.*
 !.env.example
@@ -15,3 +16,9 @@ backups/
 *.log
 .DS_Store
 Thumbs.db
+__pycache__/
+*.pyc
+.venv/
+*.alve
+target/
+src-tauri/gen/
