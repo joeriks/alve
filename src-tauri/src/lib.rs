@@ -1,4 +1,11 @@
 mod http;
+#[cfg(mobile)]
+mod mobile;
+mod sync;
+#[cfg(desktop)]
+mod updater;
+#[cfg(mobile)]
+#[path = "mobile_updater.rs"]
 mod updater;
 
 use base64::Engine as _;
@@ -7,6 +14,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
+#[cfg(desktop)]
 use tauri::menu::{MenuBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -27,9 +35,13 @@ async fn alve_request(
     body: Option<Value>,
     token: Option<String>,
     updates: State<'_, updater::UpdateState>,
+    sync: State<'_, sync::SyncState>,
 ) -> Result<Value, String> {
     if window.label() != "main" {
         return Err("Local main window required.".into());
+    }
+    if method == "POST" && path == "/api/lock" {
+        sync.cancel_all();
     }
     let installing = updates.installing.clone();
     let engine = state.inner().clone();
@@ -56,6 +68,11 @@ async fn alve_request(
 #[tauri::command]
 async fn service_info() -> Value {
     http::service_info()
+}
+
+#[tauri::command]
+fn platform_info() -> Value {
+    serde_json::json!({"platform":std::env::consts::OS,"mobile":cfg!(mobile)})
 }
 
 #[tauri::command]
@@ -104,6 +121,10 @@ async fn save_export(
     .await
     .map_err(|_| "Could not select export destination.")?;
     let Some(path) = path else { return Ok(false) };
+    #[cfg(target_os = "android")]
+    if let tauri_plugin_dialog::FilePath::Url(uri) = path {
+        return mobile::write_saf_uri(&window, &uri, bytes).map(|_| true);
+    }
     let path = path
         .as_path()
         .ok_or("Selected destination is not a local path.")?
@@ -130,22 +151,29 @@ fn open_reference(app: AppHandle, window: tauri::WebviewWindow, url: String) -> 
         .map_err(|_| "Could not open reference.".into())
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(updater::UpdateState::default())
+        .manage(sync::SyncState::default())
+        .manage(updater::UpdateState::default());
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
         .setup(|app| {
-            let help = SubmenuBuilder::new(app, "Help")
-                .text("check_updates", "Check for updates…")
-                .build()?;
-            app.set_menu(MenuBuilder::new(app).item(&help).build()?)?;
-            app.on_menu_event(|app, event| {
-                if event.id().as_ref() == "check_updates" {
-                    let _ = app.emit("alve-check-for-updates", ());
-                }
-            });
+            #[cfg(desktop)]
+            {
+                let help = SubmenuBuilder::new(app, "Help")
+                    .text("check_updates", "Check for updates…")
+                    .build()?;
+                app.set_menu(MenuBuilder::new(app).item(&help).build()?)?;
+                app.on_menu_event(|app, event| {
+                    if event.id().as_ref() == "check_updates" {
+                        let _ = app.emit("alve-check-for-updates", ());
+                    }
+                });
+            }
             let dir = std::env::var_os("ALVE_DATA_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| {
@@ -158,16 +186,23 @@ pub fn run() {
                 alve_core::api::Engine::new(dir.join("memory.alve")).map_err(|e| e.message)?;
             let shared = Arc::new(Mutex::new(engine));
             app.manage(shared.clone());
+            #[cfg(target_os = "android")]
+            mobile::register(app.handle());
             tauri::async_runtime::spawn(http::start(shared));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             alve_request,
             service_info,
+            platform_info,
             save_export,
             open_reference,
             updater::check_update,
-            updater::install_update
+            updater::install_update,
+            sync::sync_start,
+            sync::sync_pull,
+            sync::sync_status,
+            sync::sync_stop
         ])
         .run(tauri::generate_context!())
         .expect("error while running Alve");

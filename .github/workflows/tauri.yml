@@ -25,7 +25,7 @@ jobs:
           node-version: '24'
           cache: npm
       - run: rustup update stable --no-self-update
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         id: native-cache
         with:
           path: |

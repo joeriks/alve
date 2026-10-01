@@ -86,6 +86,7 @@ pub async fn install_update(
     window: WebviewWindow,
     state: State<'_, UpdateState>,
     engine: State<'_, SharedEngine>,
+    sync: State<'_, crate::sync::SyncState>,
     version: String,
 ) -> Result<(), String> {
     require_main(&window)?;
@@ -124,6 +125,7 @@ pub async fn install_update(
     }, || {}).await.map_err(|_| "The update could not be downloaded or verified. Nothing was installed; check again to retry.")?;
     // Stop new owner requests, then drain any existing mutation under the shared mutex.
     // Each successful mutation already persisted; locking must precede Windows install's exit.
+    sync.cancel_all();
     state.installing.store(true, Ordering::SeqCst);
     let shared = engine.inner().clone();
     let lock_result = tauri::async_runtime::spawn_blocking(move || {

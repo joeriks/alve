@@ -10,7 +10,7 @@ Your memory lives on your devices. AI clients use a local, permission-controlled
 
 The desktop POC runs in Tauri 2 with a Rust core and a bundled HTML/CSS/JavaScript interface. It implements encrypted persistence, graph editing, typed facts, scoped AI access, reviewed proposals, and manual encrypted bundle exchange with retained conflicts. A native `alve-mcp` stdio companion connects AI clients to the local Rust API. The Python POC remains as a reference implementation and interoperability test fixture.
 
-It is not a production security implementation. Native phone apps, automatic LAN/hotspot transport, secure device pairing, SQLCipher integration, attachments, calendar recurrence/reminders, and app-initiated model inference remain future work.
+The Android preview reuses the Rust core and supports explicit local backups and foreground Wi-Fi exchange. See [Android installation and operation](docs/android.md). It is not a production security implementation. Automatic background synchronization, secure persistent device pairing, SQLCipher integration, attachments, calendar recurrence/reminders, and app-initiated model inference remain future work.
 
 ## Run the native desktop app
 
@@ -29,7 +29,7 @@ The UI opens directly in the desktop window. The locked screen does not decrypt 
 
 The default vault is in the operating system's Alve application-data directory. `ALVE_DATA_DIR` selects another directory; `ALVE_API_PORT` selects the loopback AI port. The native app exposes only scoped AI routes over HTTP; owner operations use local Tauri IPC. **AI contract** shows the active HTTP endpoint. If the preferred port is busy, the app chooses an available loopback port.
 
-See [native operation and migration](docs/tauri.md) and [storage, backups, and synchronization](docs/storage-and-sync.md). Native phone builds and automatic LAN synchronization remain future work.
+See [native operation and migration](docs/tauri.md), [Android preview](docs/android.md), and [storage, backups, and synchronization](docs/storage-and-sync.md). Foreground Wi-Fi exchange uses encrypted snapshots and short-lived transfer links; it does not authenticate peer identity or provide automatic background sync.
 
 ## Run the Python reference POC
 
@@ -89,7 +89,7 @@ The original sketch above is separate from the working POC served by `python -m 
 
 ## Decisions still open
 
-- Mobile operating systems and native phone integration. Desktop uses Tauri 2 and Rust.
+- Further phone integration beyond the Android Tauri/Rust preview.
 - Concrete synchronization protocol, cryptographic libraries, and key recovery format.
 - Retention periods for working material, historical revisions, and deletion records.
 - Which AI clients and local model runtimes to support first.

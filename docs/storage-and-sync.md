@@ -23,7 +23,37 @@ Bundle exchange is currently a manual operation:
 
 Restore is for a fresh installation without an existing vault. Import is the same-vault operation: it merges the bundle into the current vault, retains revision history and conflicts, and does not silently replace existing data. Review conflicting heads and resolve them explicitly. Foreign-vault bundles are rejected.
 
-This exchange is useful for moving a vault or manually reconciling two offline installations. It is not network synchronization. There is currently no LAN or phone-hotspot sync and no native phone app. A future design may support explicit, foreground, paired peer-to-peer exchange with status shown per peer. A single global “freshness” indicator would not describe disconnected peers accurately.
+This file exchange is useful for moving a vault or manually reconciling offline installations. Native Windows and Android preview builds also support explicit foreground exchange over local Wi-Fi or a phone hotspot, described below. The Python reference supports file exchange only. There is no automatic background synchronization or single global freshness indicator for disconnected devices.
+
+## Foreground Wi-Fi exchange
+
+Keep both native apps open and unlocked on the same trusted local network. Restore
+the same vault on the second installation before exchanging changes; a foreign
+vault is rejected.
+
+1. On device A, open **Storage, backup & sync > Offer this device's changes**.
+2. Enter A's private Wi-Fi IPv4 address from its network settings and create a link.
+3. Copy the single-use, five-minute link to device B using a method you control.
+   Paste it into Alve's **Receive and merge changes**, not a browser.
+4. Supply the exporting vault's password on B. The encrypted snapshot is imported
+   durably before Alve sends an import receipt. Inspect any conflicts.
+5. Create a new offer on B and receive it on A to exchange changes in both
+   directions. Changes after an offer was created require a new offer.
+
+This version transfers an encrypted bundle over HTTP and does not authenticate
+the other device's identity. Vault contents use the established bundle encryption;
+the vault password is entered locally and is not sent over the network. A network
+observer can see transfer metadata and the short-lived retrieval code, and may
+disrupt or replay a transfer. Use only a trusted network and keep the code private.
+An import receipt is a peer's report, not cryptographic proof of its storage state.
+
+Only the encrypted snapshot and receipt routes are offered on a user-selected
+private IPv4 interface. Owner and AI APIs remain on loopback. Offers expire, are
+single-use and stop on vault lock or mobile backgrounding. The receiving client
+rejects public addresses, redirects, proxies and oversized responses. Wi-Fi client
+isolation or a firewall may prevent peers connecting; in that case use manual
+encrypted file exchange. Network failure after a local merge may prevent its
+receipt reaching A; review local data rather than assuming failure means rollback.
 
 ## Synchronization is not backup
 

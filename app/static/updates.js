@@ -1,7 +1,8 @@
-(() => {
+(async () => {
   'use strict';
   const native = () => window.__TAURI__?.core?.invoke;
   if (!native()) return;
+  try { if ((await native()('platform_info')).mobile) return; } catch { /* Older desktop shells. */ }
 
   const dialog = document.createElement('dialog');
   dialog.setAttribute('aria-labelledby', 'update-title');

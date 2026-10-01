@@ -50,7 +50,7 @@ Windows uses `alve-mcp.exe`. Keep real tokens outside the repository. The bridge
 
 `cargo test -p alve-core` covers core failure paths. `cargo build -p alve-core --bins` builds the acceptance driver and MCP bridge. `python -m unittest discover -s tests -v` additionally exercises the Python reference and cross-runtime compatibility when the Rust driver is present. Python is required only for these reference tests, not for native runtime.
 
-Native CI builds Windows x64 and ARM64 executables and runs both Rust and interoperability checks. Those build artifacts are development binaries, not signed distribution releases. Native phones, automatic peer discovery/pairing, incremental LAN transport, multiple vaults in one instance, recovery keys, key rotation, and full calendar behavior are outside this port.
+Native CI builds Windows x64 and ARM64 executables and runs both Rust and interoperability checks. Android has a separate APK/emulator workflow and shares the Rust core; see [Android preview](android.md). Build artifacts must be signed locally before distribution. Automatic peer discovery/pairing, incremental LAN transport, multiple vaults in one instance, recovery keys, key rotation, and full calendar behavior remain outside this preview.
 
 ## Native smoke verification
 
