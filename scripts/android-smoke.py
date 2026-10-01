@@ -107,7 +107,8 @@ try:
     assert 'ALLOW_BACKUP' not in package, 'Android automatic backup enabled'
     # Use the actual export button and SAF picker, then compare saved bytes with
     # the encrypted payload passed through the native bridge.
-    evaluate("window.exportOutcome=null;window.originalInvoke=window.__TAURI__.core.invoke;window.__TAURI__.core.invoke=(command,args)=>{const result=window.originalInvoke(command,args);if(command==='save_export'){window.exportArgs=args;result.then(value=>window.exportOutcome={value},error=>window.exportOutcome={error:String(error)});}return result;};document.querySelector('#nav [data-view=backup]').click();true")
+    evaluate("window.exportOutcome=null;window.originalInvoke=window.__TAURI__.core.invoke;window.captureInvoke=(command,args)=>{const result=window.originalInvoke(command,args);if(command==='save_export'){window.exportArgs=args;result.then(value=>window.exportOutcome={value},error=>window.exportOutcome={error:String(error)});}return result;};window.__TAURI__.core={...window.__TAURI__.core,invoke:window.captureInvoke};document.querySelector('#nav [data-view=backup]').click();true")
+    assert evaluate('window.__TAURI__.core.invoke===window.captureInvoke'), 'Native export observation hook was not installed'
     evaluate("Array.from(document.querySelectorAll('#content button')).find(x=>x.textContent==='Export encrypted .alve bundle').click();true")
     save_document()
     wait("window.exportOutcome!==null")

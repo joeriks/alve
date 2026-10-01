@@ -1,0 +1,60 @@
+name: Android emulator verification
+on:
+  workflow_dispatch:
+    inputs:
+      apk_run:
+        description: Run containing the alve-android-emulator artifact
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify APK source matches this checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALVE_APK_RUN: ${{ inputs.apk_run }}
+        run: |
+          [[ "$ALVE_APK_RUN" =~ ^[0-9]+$ ]] || exit 1
+          source=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ALVE_APK_RUN" --jq .head_sha)
+          git diff --quiet "$source" HEAD -- Cargo.toml Cargo.lock package.json package-lock.json app/static crates src-tauri scripts/prepare-android.mjs
+      - uses: actions/download-artifact@v4
+        with:
+          name: alve-android-emulator
+          run-id: ${{ inputs.apk_run }}
+          github-token: ${{ github.token }}
+          path: src-tauri/gen/android/app/build/outputs/apk/reused/debug
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - run: python -m pip install websocket-client
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: python scripts/android-smoke.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: alve-android-acceptance
+          path: android-test-results/*
