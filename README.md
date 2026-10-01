@@ -103,3 +103,14 @@ The specification is a starting point for implementation, not a security certifi
 Choose **Select memories** above the list, or **Menu > Select & organize memories**. Click rows or checkboxes; search and tag filters retain the selection. **Select visible** selects only displayed rows, and **Clear selection** clears the full selection. Review the selected titles before saving.
 
 Choose **Create a new group**, **Add to an existing memory or project** (a `belongs_to` link), or **Create relations** with a chosen direction and type. Existing memory text, tags and AI grants are preserved. Bulk links are owner-only, checked against the endpoint revisions and saved atomically; existing identical links are skipped. Up to 50 sources can be linked at once.
+
+
+### Exploring the memory graph
+
+The graph starts with projects and ungrouped memories. Choose **Focus here** or double-click a memory to open its neighborhood; expand or collapse the neighborhood from the details panel. **Graph menu > Show every memory** opens the complete map. Labels stay readable, so larger maps can extend beyond the window: drag the background to pan, or use the zoom controls.
+
+Following a relation reveals its endpoint and clears blocking search/tag filters. **Reset view** clears the search and returns to the project overview. The **Details** button toggles the inspector; on narrow screens it appears as a bottom panel. Sources and typed facts appear in the inspector, with editing and archiving under **Actions**. Keyboard users can select with Enter/Space and follow a visible neighboring memory with an arrow key.
+
+Multi-selection lists all selected names, including memories outside the current filtered view. Creating a group previews those members. Graph drafts require explicit discard on Cancel/Escape and block app updates while dirty or saving. Archiving and unlinking require an awaited local confirmation; cancellation leaves storage unchanged.
+
+Optional graph UI regression checks require Playwright and an installed Microsoft Edge browser: `node --test tests/test_graph_ui.cjs`. The suite covers 100 synthetic memories, filters, sources, typed facts, member previews, confirmation cancellation, failed saves and update/draft guards. It does not test Android device behavior.

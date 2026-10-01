@@ -40,10 +40,10 @@
     state.searches[searchScope(state.current)]=$('#search').value;
     $('#search').placeholder=searchScope(state.current)==='agents'?'Search agents':'Search memories';$('#search').setAttribute('aria-label',$('#search').placeholder);
   }
-  window.addEventListener('popstate',event=>{
+  window.addEventListener('popstate',async event=>{
     if(!state.token||event.state?.alveSession!==navigation.session)return;
     const entry=navigation.entries.get(event.state.alveEntry);if(!entry||entry.id===navigation.entry?.id)return;
-    if(editorHasContent()&&!window.confirm('Discard unsaved changes?')){history.go(navigation.entry.id>entry.id?1:-1);return;}
+    if(editorHasContent()&&!await window.AlveConfirm('Discard unsaved changes?')){history.go(navigation.entry.id>entry.id?1:-1);return;}
     const data=entry.data;Object.assign(state,{current:data.current,selected:data.selected,tag:data.tag,listLimit:data.listLimit,archiveFilter:data.archiveFilter,groupsOnly:data.groupsOnly});$('#search').value=data.query;navigation.entry=entry;navigation.restoring=true;render();requestAnimationFrame(()=>window.scrollTo(0,data.scroll));
   });
   function openMemory(id,agent=false){state.selected=id;state.current=agent?'agentDetail':'detail';render();}
@@ -173,7 +173,7 @@
     }
     const related=(state.graph.relations||[]).filter(r=>r.fromId===n.id||r.toId===n.id);
     const members=related.filter(r=>r.type==='belongs_to'&&r.toId===n.id),others=related.filter(r=>!members.includes(r));
-    const relationRow=r=>{const x=byId(r.fromId===n.id?r.toId:r.fromId);if(!x)return el('div');const label=r.type==='belongs_to'?(r.fromId===n.id?'Belongs to':'Contains'):String(r.type||'related_to').replaceAll('_',' ');const actions=el('details',{class:'relation-actions'},el('summary',{text:'Actions'}),btn('Unlink','secondary',async event=>{if(!window.confirm(`Unlink “${byId(r.fromId)?.title}” → ${r.type.replaceAll('_',' ')} → “${byId(r.toId)?.title}”?`))return;const button=event.currentTarget;button.disabled=true;try{await api(`/api/relations/${encodeURIComponent(r.id)}`,{method:'DELETE'});state.lastUnlink=r;toast('Relation unlinked.');await refresh()}catch(error){button.disabled=false;throw error}}));return el('div',{class:'relation-row'},btn(`${label}: ${x.title||'Untitled'}${x.status==='archived'?' (archived)':''}`,'secondary',()=>openMemory(x.id)),actions);};
+    const relationRow=r=>{const x=byId(r.fromId===n.id?r.toId:r.fromId);if(!x)return el('div');const label=r.type==='belongs_to'?(r.fromId===n.id?'Belongs to':'Contains'):String(r.type||'related_to').replaceAll('_',' ');const actions=el('details',{class:'relation-actions'},el('summary',{text:'Actions'}),btn('Unlink','secondary',async event=>{if(!await window.AlveConfirm(`Unlink “${byId(r.fromId)?.title}” → ${r.type.replaceAll('_',' ')} → “${byId(r.toId)?.title}”?`))return;const button=event.currentTarget;button.disabled=true;try{await api(`/api/relations/${encodeURIComponent(r.id)}`,{method:'DELETE'});state.lastUnlink=r;toast('Relation unlinked.');await refresh()}catch(error){button.disabled=false;throw error}}));return el('div',{class:'relation-row'},btn(`${label}: ${x.title||'Untitled'}${x.status==='archived'?' (archived)':''}`,'secondary',()=>openMemory(x.id)),actions);};
     if(members.length)article.append(el('section',{class:'related memory-section'},el('h3',{text:`Memories in this group (${members.length})`}),...members.map(relationRow)));
     if(others.length)article.append(el('details',{class:'related memory-section'},el('summary',{text:`Related memories (${others.length})`}),...others.map(relationRow)));
     article.append(el('details',{class:'memory-section meta'},el('summary',{text:'Information'}),el('p',{text:`${n.type || 'memory'} · ${n.kind || 'note'} · revised ${n.updatedAt || 'unknown'}`})));
@@ -190,6 +190,8 @@
     state.graphView ||= window.AlveGraph.initial();
     window.AlveGraph.mount(c,state.graph,state.graphView,{
       error:message=>toast(message,true),
+      clearSearch:()=>{$('#search').value='';state.searches.memories='';},
+      reference:url=>{if(native())native()('open_reference',{url}).catch(error=>toast(String(error),true));else window.open(url,'_blank','noopener');},
       open:id=>openMemory(id),
       save:(path,method,data)=>api(path,{method,body:JSON.stringify(data)}),
       refresh:()=>refresh(),
@@ -290,7 +292,7 @@
   }
   async function runs(c) {
     const requestToken=state.token;
-    const actions=el('details',{class:'memory-actions'},el('summary',{text:'Actions'}),el('div',{class:'toolbar'},btn('Clear finished local runs','secondary',async()=>{if(!window.confirm('Clear finished and expired local run records? Approved handoff memories are kept. Active runs and pending reports remain.'))return;const out=await api('/api/agent-runs/prune',{method:'POST'});toast(`${out.removed} local run records cleared.`);await refresh()})));
+    const actions=el('details',{class:'memory-actions'},el('summary',{text:'Actions'}),el('div',{class:'toolbar'},btn('Clear finished local runs','secondary',async()=>{if(!await window.AlveConfirm('Clear finished and expired local run records? Approved handoff memories are kept. Active runs and pending reports remain.'))return;const out=await api('/api/agent-runs/prune',{method:'POST'});toast(`${out.removed} local run records cleared.`);await refresh()})));
     c.append(el('div',{class:'section-head'},el('h3',{text:'Run history'}),actions));
     c.append(el('p',{class:'notice',text:'Runs track an AI client’s reported work. Alve does not start an AI or schedule follow-ups. Leases are local to this device; approved handoffs are included in memory backups and manual exchange.'}));
     try {
@@ -355,12 +357,12 @@
     : state.current==='editor'&&editorSignature()!==state.editorBaseline;
   const closeMenu=()=>{document.querySelectorAll('.app-menu[open],.memory-actions[open],.gate-options[open]').forEach(item=>{item.open=false})};
   const runsMenuButton=el('button',{class:'menu-action','data-view':'runs',type:'button',text:'Agent runs'});$('#nav').insertBefore(runsMenuButton,$('#nav [data-view="backup"]'));const agentMenuButton=el('button',{class:'menu-action','data-view':'agents',type:'button',text:'Agents'});$('#nav').insertBefore(agentMenuButton,$('#nav [data-view="backup"]'));
-  $('#nav').addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b)return;if(editorHasContent()&&!window.confirm('Discard unsaved changes?'))return;closeMenu();setView(b.dataset.view)});
-  $('.brand').addEventListener('click',e=>{e.preventDefault();if(editorHasContent()&&!window.confirm('Discard unsaved changes?'))return;setView('overview')});
-  $('#lock').addEventListener('click',async()=>{if(editorHasContent()&&!window.confirm('Lock the vault and discard unsaved changes?'))return;try{await api('/api/lock',{method:'POST'})}catch(e){toast(e.message,true)}finally{state.agentDraft=null;state.agentStep=1;closeMenu();lockLocal()}});
+  $('#nav').addEventListener('click',async e=>{const b=e.target.closest('[data-view]');if(!b)return;if(editorHasContent()&&!await window.AlveConfirm('Discard unsaved changes?'))return;closeMenu();setView(b.dataset.view)});
+  $('.brand').addEventListener('click',async e=>{e.preventDefault();if(editorHasContent()&&!await window.AlveConfirm('Discard unsaved changes?'))return;setView('overview')});
+  $('#lock').addEventListener('click',async()=>{if(editorHasContent()&&!await window.AlveConfirm('Lock the vault and discard unsaved changes?'))return;try{await api('/api/lock',{method:'POST'})}catch(e){toast(e.message,true)}finally{state.agentDraft=null;state.agentStep=1;closeMenu();lockLocal()}});
   document.addEventListener('click',e=>{if(e.target.closest('[data-native-update]')||!e.target.closest('.app-menu,.memory-actions,.gate-options'))closeMenu()});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){const opened=document.querySelector('.app-menu[open],.memory-actions[open],.gate-options[open]');if(opened){closeMenu();opened.querySelector('summary').focus()}}});
-  $('#search').addEventListener('input',()=>{state.listLimit=40;if(editorHasContent()&&!window.confirm('Discard unsaved changes to search?')){$('#search').value=navigation.entry?.data.query||'';return;}if(!['overview','agents','graph'].includes(state.current))setView(searchScope(state.current)==='agents'?'agents':'overview');else render()});
+  $('#search').addEventListener('input',async()=>{state.listLimit=40;if(editorHasContent()&&!await window.AlveConfirm('Discard unsaved changes to search?')){$('#search').value=navigation.entry?.data.query||'';return;}if(!['overview','agents','graph'].includes(state.current))setView(searchScope(state.current)==='agents'?'agents':'overview');else render()});
   async function initializePlatform(){
     if(native()){
       try{platform=await native()('platform_info');}catch{/* Older desktop shells remain usable. */}
@@ -368,10 +370,10 @@
       window.__TAURI__.event.listen('alve-vault-locked',()=>{state.syncReceipt=null;lockLocal();});
       if(platform.mobile&&window.__TAURI__.app?.onBackButtonPress){
         await window.__TAURI__.app.onBackButtonPress(async()=>{
-          const dialog=document.querySelector('dialog[open]');if(dialog){dialog.dispatchEvent(new Event('cancel',{cancelable:true}));if(dialog.open)dialog.close();return;}
+          const dialog=[...document.querySelectorAll('dialog[open]')].at(-1);if(dialog){if(dialog.dispatchEvent(new Event('cancel',{cancelable:true}))&&dialog.open)dialog.close();return;}
           if(document.querySelector('.app-menu[open],.memory-actions[open],.gate-options[open]')){closeMenu();return;}
           if(state.token&&navigation.entry?.previous!==null&&navigation.entry){history.back();return;}
-          if(state.token){if(editorHasContent()&&!confirm('Lock the vault and discard unsaved changes?'))return;await api('/api/lock',{method:'POST'});await lockLocal();}
+          if(state.token){if(editorHasContent()&&!await window.AlveConfirm('Lock the vault and discard unsaved changes?'))return;await api('/api/lock',{method:'POST'});await lockLocal();}
         });
       }
     }

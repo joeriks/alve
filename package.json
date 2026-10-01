@@ -1,9 +1,9 @@
 {
   "name": "alve",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.1",
   "scripts": {
-    "check": "node --check app/static/graph.js && node --check app/static/app.js && node --check app/static/updates.js && node --check app/static/agents.js && node --check app/static/sync.js",
+    "check": "node --check app/static/confirm.js && node --check app/static/graph.js && node --check app/static/app.js && node --check app/static/updates.js && node --check app/static/agents.js && node --check app/static/sync.js",
     "test:agents": "node --test tests/test_agents.js",
     "tauri": "tauri",
     "dev": "tauri dev",
