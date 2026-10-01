@@ -60,7 +60,7 @@ def wait(expression, seconds=30):
         if evaluate(expression):
             return
         time.sleep(.4)
-    details = evaluate("JSON.stringify({gateError:document.querySelector('#gate-error')?.textContent,gateTitle:document.querySelector('#gate-title')?.textContent,create:document.querySelector('#unlock-form')?.dataset.create})")
+    details = evaluate("JSON.stringify({gateError:document.querySelector('#gate-error')?.textContent,formError:document.querySelector('#content .form-error')?.textContent,view:document.querySelector('#view-title')?.textContent,gateTitle:document.querySelector('#gate-title')?.textContent,create:document.querySelector('#unlock-form')?.dataset.create})")
     raise AssertionError(f'Condition did not become true: {expression}; {details}')
 
 def unlock():
@@ -89,8 +89,10 @@ try:
     unlock()
     evaluate("document.querySelector('#nav [data-view=editor]').click();true")
     wait("Boolean(document.querySelector('#content [name=title]'))")
-    evaluate("document.querySelector('#content [name=title]').value='Synthetic Android memory';document.querySelector('#content [name=body]').value='Remember the portable vault.';document.querySelector('#content form').requestSubmit();true")
+    evaluate("document.querySelector('#content [name=title]').value='Synthetic Android memory';document.querySelector('#content [name=body]').value='Remember the portable vault.';Array.from(document.querySelectorAll('#content button')).find(x=>x.textContent==='Save memory').click();true")
     wait("Boolean(document.querySelector('.detail-title')?.textContent.includes('Synthetic Android memory'))")
+    adb('shell', 'input', 'keyevent', '4')
+    wait("document.querySelector('#view-title').textContent==='New memory'")
     adb('shell', 'input', 'keyevent', '4')
     wait("document.querySelector('#view-title').textContent==='Memories'")
     adb('shell', 'input', 'keyevent', '3')
@@ -150,5 +152,5 @@ try:
     (OUT / 'result.txt').write_text('PASS: real Android creation, native save, Back, background lock, reopen, SAF encrypted export/cancel/session expiry, fresh-install recovery, mobile updater exclusion and backup policy.\n')
     print('Android acceptance passed.')
 finally:
-    (OUT / 'logcat.txt').write_text(adb('logcat','-d','-s','alve','chromium','AndroidRuntime'))
+    (OUT / 'logcat.txt').write_text(adb('logcat','-d'))
     ws.close()
