@@ -162,7 +162,7 @@ mod tests {
     use super::*;
     #[test]
     fn only_exact_newer_official_architecture_assets_are_accepted() {
-        let current = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
         let future = format!("{}.{}.{}", current.major, current.minor, current.patch + 1);
         let url = format!("https://github.com/joeriks/alve/releases/download/v{future}/Alve_{future}_windows-aarch64-setup.exe");
         assert!(validate_release(&future, &url, "aarch64").is_ok());
