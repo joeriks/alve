@@ -108,6 +108,7 @@ impl Engine {
             }),
             ("POST", "/api/nodes") => self.vault.mutate(|v| v.add_node(data, None, None, "user")),
             ("POST", "/api/relations") => self.vault.mutate(|v| v.add_relation(data)),
+            ("POST", "/api/relations/batch") => self.vault.mutate(|v| v.add_relations_batch(data)),
             ("POST", "/api/nodes/group") => self.vault.mutate(|v| v.group_nodes(data)),
             ("POST", "/api/agent-runs/prune") => self.vault.mutate(agents::prune),
             ("POST", "/api/connections") => self.vault.mutate(|v| v.grant(data)),

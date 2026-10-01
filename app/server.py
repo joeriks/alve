@@ -250,6 +250,8 @@ class Handler(BaseHTTPRequestHandler):
             return vault.mutate(lambda: vault.add_node(data.get("content"), parts[2], parents))
         if method == "POST" and path == "/api/relations":
             return vault.mutate(lambda: vault.add_relation(data))
+        if method == "POST" and path == "/api/relations/batch":
+            return vault.mutate(lambda: vault.add_relations_batch(data))
         if method == "POST" and path == "/api/nodes/group":
             return vault.mutate(lambda: vault.group_nodes(data))
         if method == "POST" and path == "/api/connections":

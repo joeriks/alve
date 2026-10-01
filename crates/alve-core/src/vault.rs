@@ -411,6 +411,103 @@ impl Vault {
         )?;
         Ok(relation)
     }
+    pub fn add_relations_batch(&mut self, data: &Value) -> Result<Value> {
+        let object = data
+            .as_object()
+            .ok_or_else(|| Error::new(400, "Invalid relation batch."))?;
+        if object.len() != 4
+            || !["nodeIds", "toId", "type", "expectedRevisions"]
+                .iter()
+                .all(|key| object.contains_key(*key))
+        {
+            return Err(Error::new(400, "Invalid relation batch."));
+        }
+        let ids = data["nodeIds"]
+            .as_array()
+            .ok_or_else(|| Error::new(400, "Select 1 to 50 unique source nodes."))?;
+        if ids.is_empty() || ids.len() > 50 {
+            return Err(Error::new(400, "Select 1 to 50 unique source nodes."));
+        }
+        let sources = ids
+            .iter()
+            .map(|id| {
+                id.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| Error::new(400, "Select 1 to 50 unique source nodes."))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if sources.iter().collect::<HashSet<_>>().len() != sources.len() {
+            return Err(Error::new(400, "Select 1 to 50 unique source nodes."));
+        }
+        let target = data["toId"]
+            .as_str()
+            .ok_or_else(|| Error::new(400, "Supply a target node."))?;
+        if sources.iter().any(|id| id == target) {
+            return Err(Error::new(400, "The target cannot also be a source node."));
+        }
+        let typ = data["type"]
+            .as_str()
+            .filter(|typ| RELATIONS.contains(typ))
+            .ok_or_else(|| Error::new(400, "Unsupported relation type."))?;
+        let expected = data["expectedRevisions"]
+            .as_object()
+            .ok_or_else(|| Error::new(400, "Supply expected revisions for every endpoint."))?;
+        let endpoint_ids = sources
+            .iter()
+            .cloned()
+            .chain(std::iter::once(target.to_owned()))
+            .collect::<HashSet<_>>();
+        if expected.len() != endpoint_ids.len()
+            || endpoint_ids
+                .iter()
+                .any(|id| !expected.get(id).is_some_and(Value::is_string))
+        {
+            return Err(Error::new(
+                400,
+                "Supply expected revisions for every endpoint.",
+            ));
+        }
+        let heads = self.heads()?;
+        for id in &endpoint_ids {
+            if !heads.contains_key(id) {
+                return Err(Error::new(400, "Relation endpoints must exist."));
+            }
+            let revision = expected.get(id).unwrap();
+            let current = heads.get(id).filter(|rows| {
+                rows.len() == 1
+                    && rows[0].get("status").and_then(Value::as_str) == Some("active")
+                    && rows[0].get("revisionId") == Some(revision)
+            });
+            if current.is_none() {
+                return Err(Error::new(
+                    409,
+                    "A node changed, is inactive, or has conflicting versions.",
+                ));
+            }
+        }
+        let existing = self
+            .rows("relations")?
+            .into_iter()
+            .filter(|relation| relation["toId"] == target && relation["type"] == typ)
+            .filter_map(|relation| relation["fromId"].as_str().map(str::to_owned))
+            .collect::<HashSet<_>>();
+        let additions = sources
+            .iter()
+            .filter(|source| !existing.contains(*source))
+            .cloned()
+            .collect::<Vec<_>>();
+        let count: i64 = self
+            .require()?
+            .query_row("SELECT count(*) FROM relations", [], |r| r.get(0))?;
+        if count as usize + additions.len() > MAX_RELATIONS {
+            return Err(Error::new(413, "POC relation limit reached."));
+        }
+        let relations = additions
+            .iter()
+            .map(|source| self.add_relation(&json!({"fromId":source,"toId":target,"type":typ})))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(json!({"relations":relations,"skipped":sources.len() - additions.len()}))
+    }
     pub fn grant(&mut self, data: &Value) -> Result<Value> {
         let name = text(data.get("name"), "connection name", 100, true)?;
         let alias = text(

@@ -375,6 +375,45 @@ class Vault:
         self.db.execute("INSERT INTO relations VALUES (?,?)", (relation["id"], canonical(relation)))
         return relation
 
+    def add_relations_batch(self, data):
+        if not isinstance(data, dict) or set(data) != {"nodeIds", "toId", "type", "expectedRevisions"}:
+            raise Problem("Invalid relation batch.")
+        sources = data["nodeIds"]
+        if (not isinstance(sources, list) or not 1 <= len(sources) <= 50
+                or any(not isinstance(identifier, str) for identifier in sources)
+                or len(set(sources)) != len(sources)):
+            raise Problem("Select 1 to 50 unique source nodes.")
+        target = data["toId"]
+        if not isinstance(target, str):
+            raise Problem("Supply a target node.")
+        if target in sources:
+            raise Problem("The target cannot also be a source node.")
+        relation_type = data["type"]
+        if not isinstance(relation_type, str) or relation_type not in RELATIONS:
+            raise Problem("Unsupported relation type.")
+        expected = data["expectedRevisions"]
+        endpoint_ids = set(sources) | {target}
+        if (not isinstance(expected, dict) or set(expected) != endpoint_ids
+                or any(not isinstance(revision, str) for revision in expected.values())):
+            raise Problem("Supply expected revisions for every endpoint.")
+        heads = self.heads()
+        for identifier in endpoint_ids:
+            if identifier not in heads:
+                raise Problem("Relation endpoints must exist.")
+            current = heads.get(identifier, [])
+            if (len(current) != 1 or current[0].get("status") != "active"
+                    or current[0].get("revisionId") != expected[identifier]):
+                raise Problem("A node changed, is inactive, or has conflicting versions.", 409)
+        existing = {relation["fromId"] for relation in self.rows("relations")
+                    if relation.get("toId") == target and relation.get("type") == relation_type}
+        additions = [identifier for identifier in sources if identifier not in existing]
+        count = self.db.execute("SELECT count(*) FROM relations").fetchone()[0]
+        if count + len(additions) > MAX_RELATIONS:
+            raise Problem("POC relation limit reached.", 413)
+        relations = [self.add_relation({"fromId": identifier, "toId": target, "type": relation_type})
+                     for identifier in additions]
+        return {"relations": relations, "skipped": len(sources) - len(additions)}
+
     def grant(self, data):
         name = text(data.get("name"), "connection name", 100, True)
         alias = text(data.get("vaultAlias", "memory"), "vault alias", 100, True)

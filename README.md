@@ -95,3 +95,9 @@ The original sketch above is separate from the working POC served by `python -m 
 - Which AI clients and local model runtimes to support first.
 
 The specification is a starting point for implementation, not a security certification or a claim of unique market positioning.
+
+### Organizing existing memories
+
+Choose **Select memories** above the list, or **Menu > Select & organize memories**. Click rows or checkboxes; search and tag filters retain the selection. **Select visible** selects only displayed rows, and **Clear selection** clears the full selection. Review the selected titles before saving.
+
+Choose **Create a new group**, **Add to an existing memory or project** (a `belongs_to` link), or **Create relations** with a chosen direction and type. Existing memory text, tags and AI grants are preserved. Bulk links are owner-only, checked against the endpoint revisions and saved atomically; existing identical links are skipped. Up to 50 sources can be linked at once.

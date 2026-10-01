@@ -21,7 +21,7 @@
   const activeConnections = () => (state.graph?.connections||[]).filter(connection=>!connection.revoked);
   async function refresh() { const requestedToken=state.token;try { const graph=await api('/api/graph');if(state.token!==requestedToken)return;state.graph=graph; $('#vault-id').textContent=`vault ${state.graph.vaultId}`; updateVaultSummary(); $('#proposal-count').textContent=state.graph.proposals?.filter(p=>p.status==='pending').length || ''; render(); } catch(e) { toast(e.message,true); if(/authoriz|token|unlock/i.test(e.message)) lockLocal(); } }
   function updateVaultSummary() { const summary=$('#vault-summary'); clear(summary); if(!state.graph) return; const grants=activeConnections().length; summary.append(el('p',{class:'eyebrow',text:'CURRENT VAULT'}),el('strong',{text:`vault ${state.graph.vaultId}`}),el('span',{class:'vault-state',text:'Unlocked'}),el('span',{text:`AI access: ${grants} active grant${grants===1?'':'s'}`}),el('button',{'data-view':'vaults',class:'secondary vault-list-button',type:'button',text:'Open vault list'})); }
-  async function lockLocal() { state.token=null;state.graph=null;state.selected=null;state.current='overview';state.facts=[];state.refs=[];state.selectedConnectionNodes.clear();state.selectedProposals.clear();state.selectedMemories.clear();state.tag=null;state.grouping=false;state.groupTitle='';state.listLimit=40;state.agentDraft=null;state.agentStep=1;$('#search').value=''; clear($('#content'));clear($('#vault-summary'));$('#vault-id').textContent=''; document.querySelectorAll('input[type="password"]').forEach(x=>x.value=''); $('#app').classList.add('hidden');$('#gate').classList.remove('hidden'); await status(); }
+  async function lockLocal() { state.token=null;state.graph=null;state.selected=null;state.current='overview';state.facts=[];state.refs=[];state.selectedConnectionNodes.clear();state.selectedProposals.clear();state.selectedMemories.clear();state.tag=null;state.grouping=false;state.groupTitle='';state.relationTarget='';state.relationType='related_to';state.selectionAction='new';state.selectionSaving=false;state.listLimit=40;state.agentDraft=null;state.agentStep=1;$('#search').value=''; clear($('#content'));clear($('#vault-summary'));$('#vault-id').textContent=''; document.querySelectorAll('input[type="password"]').forEach(x=>x.value=''); $('#app').classList.add('hidden');$('#gate').classList.remove('hidden'); await status(); }
 
   function setView(view) { if(view==='group'){state.grouping=true;view='overview';}else if(view!=='overview'){state.grouping=false;state.selectedMemories.clear();state.groupTitle='';} state.current=view; state.selected=null; [...document.querySelectorAll('[data-view]')].forEach(x=>x.classList.toggle('active',x.dataset.view===view)); refresh(); }
   function render() { if(!state.graph) return; const titles={overview:'Memories',vaults:'Vaults',graph:'Memory graph',tags:'Tags',editor:state.selected?'Edit memory':'New memory',proposals:'Proposals',connections:'Connections',agents:'Agents',runs:'Agent runs',agentEditor:'Add agent',agentDetail:'Agent',backup:'Storage, backup & sync',ai:'Connect an AI',detail:'Memory'}; $('.workspace').classList.toggle('detail-view',state.current==='detail'||state.current==='agentDetail');$('#view-title').textContent=titles[state.current]||'Alve'; $('#crumb').textContent=state.current==='detail'?'MEMORY':state.current==='agentDetail'?'AGENT':'VAULT'; const c=$('#content');clear(c); ({overview,vaults,graph,tags,editor,proposals,connections,agents,runs,agentEditor,agentDetail,backup,ai,detail})[state.current]?.(c);if(state.grouping)updateMemoryGrouping(); }
@@ -29,12 +29,12 @@
     const nodes=state.graph.nodes||[],q=$('#search').value.trim().toLowerCase();
     const show=nodes.filter(n=>(!state.tag||(n.tags||[]).includes(state.tag))&&(!q||`${n.title} ${n.body} ${(n.tags||[]).join(' ')}`.toLowerCase().includes(q))).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
     if(state.tag)c.append(el('div',{class:'toolbar'},el('span',{text:`Tagged #${state.tag} · ${show.length} memories`}),btn('Clear tag','secondary',()=>{state.tag=null;state.listLimit=40;render()})));
-    if(state.grouping)c.append(memoryGrouping());
+    if(state.grouping)c.append(memoryGrouping());else c.append(el('div',{class:'list-actions'},btn('Select memories','secondary',()=>{state.grouping=true;render()})));
     const list=el('div',{class:'node-list'});
     if(!show.length)list.append(el('div',{class:'card empty',text:q||state.tag?'No memories match your filters.':'No memories yet. Create the first one from Menu.'}));
     show.slice(0,state.listLimit).forEach(n=>{
-      const row=nodeRow(n);
-      if(state.grouping){const unavailable=n.status==='archived'||(state.graph.conflicts||[]).some(cf=>cf.nodeId===n.id||cf.id===n.id);const box=el('input',{type:'checkbox','aria-label':`Select ${n.title}`,disabled:unavailable?'disabled':null});box.checked=state.selectedMemories.has(n.id);box.addEventListener('click',event=>event.stopPropagation());box.addEventListener('keydown',event=>event.stopPropagation());box.addEventListener('change',()=>{if(box.checked)state.selectedMemories.add(n.id);else state.selectedMemories.delete(n.id);updateMemoryGrouping()});row.prepend(box);}
+      const row=nodeRow(n);row.dataset.memoryId=n.id;
+      if(state.grouping){const unavailable=n.status==='archived'||(state.graph.conflicts||[]).some(cf=>cf.nodeId===n.id||cf.id===n.id);const box=el('input',{type:'checkbox','aria-label':`Select ${n.title}`,disabled:unavailable?'disabled':null});box.checked=state.selectedMemories.has(n.id);box.addEventListener('click',event=>event.stopPropagation());box.addEventListener('keydown',event=>event.stopPropagation());box.addEventListener('change',()=>{toggleMemory(n.id)});row.prepend(box);}
       list.append(row);
     });
     c.append(list);
@@ -42,12 +42,50 @@
   }
   function filterTag(tag){state.tag=tag;state.current='overview';state.selected=null;state.listLimit=40;$('#search').value='';render();}
   function tags(c){const counts=new Map();(state.graph.nodes||[]).forEach(n=>new Set(n.tags||[]).forEach(tag=>counts.set(tag,(counts.get(tag)||0)+1)));if(!counts.size){c.append(el('div',{class:'card empty',text:'No tags yet. Add tags when editing a memory, or ask AI to include them in its preview.'}));return;}const list=el('div',{class:'tag-directory'});[...counts].sort(([a],[b])=>a.localeCompare(b)).forEach(([tag,count])=>list.append(btn(`#${tag} · ${count}`,'tag',()=>filterTag(tag))));c.append(list);}
-  function updateMemoryGrouping(){const count=state.selectedMemories.size,summary=$('#group-selection-count'),save=$('#save-memory-group'),title=$('#memory-group-title');if(summary)summary.textContent=`${count} selected memories will each belong to the new project group. Their text and tags stay unchanged. The group is not automatically shared with AI.`;if(save)save.disabled=count<2||count>50||!title?.value.trim();}
+  const selectableMemory = n => n && n.status !== 'archived' && !(state.graph.conflicts||[]).some(cf=>cf.nodeId===n.id||cf.id===n.id);
+  function toggleMemory(id) {
+    if(state.selectionSaving || !selectableMemory(byId(id)))return;
+    if(state.selectedMemories.has(id))state.selectedMemories.delete(id);else state.selectedMemories.add(id);
+    updateMemoryGrouping();
+  }
+  function updateMemoryGrouping(){
+    const ids=[...state.selectedMemories],mode=state.selectionAction||'new',target=byId(state.relationTarget),save=$('#save-memory-group');
+    const summary=$('#group-selection-count');
+    if(summary)summary.textContent=`${ids.length} selected${state.tag||$('#search').value.trim()?' · selections outside the current filter are retained':''}`;
+    const preview=$('#selection-preview');
+    if(preview){clear(preview);ids.forEach(id=>preview.append(el('li',{text:byId(id)?.title||id})));}
+    if(save)save.disabled=Boolean(state.selectionSaving)||ids.length>(50)||ids.length<(mode==='new'?2:1)||(mode==='new'?!state.groupTitle?.trim():!selectableMemory(target)||ids.includes(target.id));
+    document.querySelectorAll('.node-row[data-memory-id]').forEach(row=>{const checked=state.selectedMemories.has(row.dataset.memoryId);row.classList.toggle('selected-memory',checked);row.setAttribute('aria-pressed',String(checked));const box=row.querySelector('input[type=checkbox]');if(box)box.checked=checked;});
+  }
   function memoryGrouping(){
-    const available=new Set((state.graph.nodes||[]).filter(n=>n.status!=='archived'&&!(state.graph.conflicts||[]).some(cf=>cf.nodeId===n.id||cf.id===n.id)).map(n=>n.id));state.selectedMemories=new Set([...state.selectedMemories].filter(id=>available.has(id)));
-    const controls=el('fieldset',{class:'batch-controls'}),title=el('input',{id:'memory-group-title',maxlength:'120',placeholder:'For example: My responsibilities','aria-label':'New group title'});title.value=state.groupTitle||'';title.addEventListener('input',()=>{state.groupTitle=title.value;updateMemoryGrouping()});
-    const save=btn('Create group','primary',async()=>{const nodeIds=[...state.selectedMemories],groupTitle=title.value.trim();if(nodeIds.length<2||nodeIds.length>50||!groupTitle)throw new Error('Select 2 to 50 memories and enter a group title.');controls.disabled=true;const picks=[...$('#content').querySelectorAll('input[type=checkbox]')];picks.forEach(box=>box.disabled=true);try{const out=await api('/api/nodes/group',{method:'POST',body:JSON.stringify({nodeIds,groupTitle})});state.grouping=false;state.selectedMemories.clear();state.groupTitle='';state.selected=out.group.id;state.current='detail';toast('Group created.');await refresh();}finally{controls.disabled=false;picks.forEach(box=>box.disabled=false);}});save.id='save-memory-group';save.disabled=true;
-    controls.append(el('h3',{text:'Group existing memories'}),field('New group title',title),el('p',{id:'group-selection-count',class:'meta',text:`${state.selectedMemories.size} selected. Select 2 to 50 memories below. Archived memories and unresolved conflicts cannot be grouped.`}),el('div',{class:'toolbar'},save,btn('Cancel','secondary',()=>{state.grouping=false;state.selectedMemories.clear();state.groupTitle='';render()})));return controls;
+    state.selectedMemories=new Set([...state.selectedMemories].filter(id=>selectableMemory(byId(id))));
+    const mode=state.selectionAction||'new',controls=el('fieldset',{class:'batch-controls'});
+    const action=selectOf(['new','collect','relate'],mode);
+    [...action.options].forEach((o,i)=>o.textContent=['Create a new group','Add to an existing memory or project','Create relations'][i]);
+    action.setAttribute('aria-label','Selection action');action.addEventListener('change',()=>{state.selectionAction=action.value;render()});
+    controls.append(el('div',{class:'section-head'},el('strong',{id:'group-selection-count',text:`${state.selectedMemories.size} selected`}),btn('Done','secondary',()=>{state.grouping=false;state.selectedMemories.clear();state.groupTitle='';render()})),field('Action',action));
+    if(mode==='new'){
+      const title=el('input',{id:'memory-group-title',maxlength:'120',placeholder:'For example: My responsibilities','aria-label':'New group title'});title.value=state.groupTitle||'';title.addEventListener('input',()=>{state.groupTitle=title.value;updateMemoryGrouping()});controls.append(field('New group title',title));
+    }else{
+      const search=el('input',{type:'search',placeholder:'Find a memory or project','aria-label':'Find relation target'}),target=el('select',{'aria-label':'Relation target'});
+      const fill=()=>{clear(target);target.append(el('option',{value:'',text:'Choose a target…'}));(state.graph.nodes||[]).filter(n=>selectableMemory(n)&&!state.selectedMemories.has(n.id)&&(n.id===state.relationTarget||`${n.title} ${(n.tags||[]).join(' ')}`.toLowerCase().includes(search.value.toLowerCase()))).forEach(n=>target.append(el('option',{value:n.id,text:n.title||n.id})));target.value=state.relationTarget||'';};fill();search.addEventListener('input',fill);target.addEventListener('change',()=>{state.relationTarget=target.value;updateMemoryGrouping()});controls.append(field('Target',search),target);
+      if(mode==='relate'){const type=selectOf(['related_to','belongs_to','based_on','supersedes','contradicts','fulfills'],state.relationType||'related_to');type.setAttribute('aria-label','Relation type');type.addEventListener('change',()=>state.relationType=type.value);controls.append(field('Relation from each selected memory to the target',type));}
+    }
+    controls.append(el('details',{},el('summary',{text:'Review selected memories'}),el('ul',{id:'selection-preview'})),el('p',{class:'meta',text:'Select up to 50 memories. Archived memories and unresolved conflicts cannot be selected.'}),el('p',{class:'meta',text:mode==='new'?'Each selected memory will belong to the new group.':mode==='collect'?'Each selected memory will belong to the target.':'One directed relation will connect each selected memory to the target.'}));
+    const save=btn(mode==='new'?'Create group':mode==='collect'?'Add to target':'Create relations','primary',async()=>{
+      if(state.selectionSaving)return;
+      const nodeIds=[...state.selectedMemories],toId=state.relationTarget;
+      if(!nodeIds.length||nodeIds.length>50)throw new Error('Select up to 50 memories.');
+      state.selectionSaving=true;controls.disabled=true;$('#search').disabled=true;
+      try{
+        let out;
+        if(mode==='new')out=await api('/api/nodes/group',{method:'POST',body:JSON.stringify({nodeIds,groupTitle:state.groupTitle?.trim()})});
+        else{const expectedRevisions=Object.fromEntries([...nodeIds,toId].map(id=>[id,byId(id)?.revisionId]));out=await api('/api/relations/batch',{method:'POST',body:JSON.stringify({nodeIds,toId,type:mode==='collect'?'belongs_to':state.relationType||'related_to',expectedRevisions})});}
+        state.grouping=false;state.selectedMemories.clear();state.groupTitle='';state.selected=mode==='new'?out.group.id:toId;state.current='detail';toast(mode==='new'?'Group created.':`${out.relations.length} relations created${out.skipped?`; ${out.skipped} already existed`:''}.`);await refresh();
+      }finally{state.selectionSaving=false;controls.disabled=false;$('#search').disabled=false;updateMemoryGrouping();}
+    });save.id='save-memory-group';save.disabled=true;
+    controls.append(el('div',{class:'toolbar'},btn('Select visible','secondary',()=>{document.querySelectorAll('.node-row[data-memory-id]').forEach(row=>{if(selectableMemory(byId(row.dataset.memoryId)))state.selectedMemories.add(row.dataset.memoryId)});render()}),btn('Clear selection','secondary',()=>{state.selectedMemories.clear();render()}),save));
+    return controls;
   }
   const stat=(name,value)=>el('div',{class:'stat'},el('span',{text:name}),el('strong',{text:value}));
   function revokeConnectionButton(connection) { return el('button',{class:'danger',type:'button',onClick:async event=>{const button=event.currentTarget;button.disabled=true;try{await api(`/api/connections/${encodeURIComponent(connection.id)}`,{method:'DELETE'});toast('Connection revoked.');await refresh()}catch(error){button.disabled=false;toast(error.message||'The connection could not be revoked.',true)}}},'Revoke'); }
@@ -76,7 +114,7 @@
     c.append(history);
   }
   function tagList(tags,interactive=true){return el('div',{class:'memory-tags','aria-label':'Tags'},el('span',{class:'tag-label',text:'Tags: '}),...(tags||[]).length?(tags||[]).map(t=>interactive?el('button',{class:'tag',type:'button',text:`#${t}`,onClick:event=>{event.stopPropagation();filterTag(t)},onKeydown:event=>event.stopPropagation()}):el('span',{class:'tag',text:`#${t}`})):[el('span',{class:'meta',text:'No tags'})]);}
-  function nodeRow(n) { const open=()=>{state.selected=n.id;state.current='detail';render()}; return el('article',{class:'card node-row',role:'button',tabindex:'0',onClick:open,onKeydown:event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();open()}}},el('i',{class:typeClass(n.type)}),el('div',{},el('h4',{text:n.title||'Untitled memory'}),el('p',{text:short(n.body)})),tagList(n.tags)); }
+  function nodeRow(n) { const open=()=>{if(state.grouping&&state.current==='overview'){toggleMemory(n.id);return;}state.selected=n.id;state.current='detail';render()}; return el('article',{class:'card node-row',role:'button',tabindex:'0',onClick:open,onKeydown:event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();open()}}},el('i',{class:typeClass(n.type)}),el('div',{},el('h4',{text:n.title||'Untitled memory'}),el('p',{text:short(n.body)})),tagList(n.tags)); }
   function detail(c) {
     const n=byId(state.selected);if(!n){setView('overview');return;}
     const conflict=(state.graph.conflicts||[]).find(x=>x.nodeId===n.id);
