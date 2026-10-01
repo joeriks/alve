@@ -72,7 +72,8 @@ fn deletion_wins_both_orders_old_replay_and_undo_survive_reopening() {
         json!([deleted.clone()])
     );
     for (index, (first, second)) in [(&old, &removed), (&removed, &old)].into_iter().enumerate() {
-        let mut peer = Vault::new(dir.path().join(format!("peer-{index}.alve"))).unwrap();
+        let mut peer =
+            Vault::new(dir.path().join(format!("peer-{index}")).join("vault.alve")).unwrap();
         peer.restore(first, PASSWORD).unwrap();
         peer.mutate(|v| v.merge(second, PASSWORD)).unwrap();
         assert_eq!(peer.graph().unwrap()["relations"], json!([]));
@@ -245,7 +246,7 @@ fn single_creation_and_restore_validate_active_nonconflicted_distinct_endpoints(
             .status,
         409
     );
-    let mut peer = Vault::new(dir.path().join("conflict.alve")).unwrap();
+    let mut peer = Vault::new(dir.path().join("conflict").join("vault.alve")).unwrap();
     peer.restore(&old, PASSWORD).unwrap();
     let mut active = source.clone();
     active["title"] = json!("concurrent");
