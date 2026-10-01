@@ -68,18 +68,24 @@ fn deletion_wins_both_orders_old_replay_and_undo_survive_reopening() {
     engine.vault.mutate(|v| v.merge(&old, PASSWORD)).unwrap();
     assert_eq!(engine.vault.graph().unwrap()["relations"], json!([]));
     assert_eq!(
-        engine.vault.rows("relations").unwrap(),
-        vec![deleted.clone()]
+        engine.vault.export().unwrap()["relations"],
+        json!([deleted.clone()])
     );
     for (index, (first, second)) in [(&old, &removed), (&removed, &old)].into_iter().enumerate() {
         let mut peer = Vault::new(dir.path().join(format!("peer-{index}.alve"))).unwrap();
         peer.restore(first, PASSWORD).unwrap();
         peer.mutate(|v| v.merge(second, PASSWORD)).unwrap();
         assert_eq!(peer.graph().unwrap()["relations"], json!([]));
-        assert_eq!(peer.rows("relations").unwrap(), vec![deleted.clone()]);
+        assert_eq!(
+            peer.export().unwrap()["relations"],
+            json!([deleted.clone()])
+        );
         peer.lock();
         peer.unlock(PASSWORD, false).unwrap();
-        assert_eq!(peer.rows("relations").unwrap(), vec![deleted.clone()]);
+        assert_eq!(
+            peer.export().unwrap()["relations"],
+            json!([deleted.clone()])
+        );
     }
     let restored = engine
         .request("POST", &format!("{path}/restore"), &json!({}), &owner)
@@ -101,7 +107,13 @@ fn deletion_wins_both_orders_old_replay_and_undo_survive_reopening() {
         engine.vault.graph().unwrap()["relations"],
         json!([restored])
     );
-    assert_eq!(engine.vault.rows("relations").unwrap().len(), 2);
+    assert_eq!(
+        engine.vault.export().unwrap()["relations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -138,8 +150,8 @@ fn malformed_tombstones_and_same_id_replacement_are_rejected_atomically() {
             .mutate(|v| v.merge(&encoded(&candidate), PASSWORD))
             .unwrap();
         assert_eq!(
-            engine.vault.rows("relations").unwrap(),
-            vec![deleted.clone()]
+            engine.vault.export().unwrap()["relations"],
+            json!([deleted.clone()])
         );
     }
     let before = engine.vault.export().unwrap();
@@ -333,5 +345,11 @@ fn batch_relinks_removed_edge_and_undo_reuses_active_duplicate() {
         *active
     );
     assert_eq!(engine.vault.graph().unwrap()["relations"], json!([active]));
-    assert_eq!(engine.vault.rows("relations").unwrap().len(), 2);
+    assert_eq!(
+        engine.vault.export().unwrap()["relations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
